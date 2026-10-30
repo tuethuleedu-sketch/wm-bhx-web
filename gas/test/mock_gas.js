@@ -106,8 +106,20 @@
   G.ScriptApp = {
     getProjectTriggers: () => M.triggers.slice(),
     deleteTrigger: (t) => { M.triggers = M.triggers.filter((x) => x !== t); },
-    newTrigger: (fn) => ({ timeBased: () => ({ everyHours: (h) => ({ create: () => { const t = { getHandlerFunction: () => fn, h }; M.triggers.push(t); return t; } }) }) }),
+    newTrigger: (fn) => {
+      const mk = (spec) => ({ create: () => { const t = { getHandlerFunction: () => fn, spec }; M.triggers.push(t); return t; } });
+      return { timeBased: () => ({ everyHours: (h) => mk({ everyHours: h }), atHour: (h) => ({ everyDays: (d) => mk({ atHour: h, everyDays: d }) }) }) };
+    },
   };
+
+  // UrlFetchApp giả: M.fetchHandler(url) → { code, body } (body là object sẽ được JSON hoá). M.fetchLog ghi mọi URL.
+  M.fetchLog = [];
+  const resp = (x) => ({ getResponseCode: () => x.code, getContentText: () => (typeof x.body === "string" ? x.body : JSON.stringify(x.body)) });
+  G.UrlFetchApp = {
+    fetch: (url) => { M.fetchLog.push(url); return resp(M.fetchHandler(url)); },
+    fetchAll: (reqs) => reqs.map((r) => { M.fetchLog.push(r.url); return resp(M.fetchHandler(r.url)); }),
+  };
+  G.Utilities.sleep = () => {};
 
   // Gọi Web app như trình duyệt/GitHub Action gọi
   G.gasCall = (body) => JSON.parse(G.doPost({ postData: { contents: typeof body === "string" ? body : JSON.stringify(body) } }).getContent());

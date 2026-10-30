@@ -24,7 +24,9 @@
   setup(); setup();
   check("setup tạo đủ 6 tab", ["users", "settings", "wm_versions", "bhx_stores", "bhx_changes", "access_log"].every((n) => SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n)));
   check("setup 2 lần: vẫn 1 Admin (chủ Sheet, viết thường)", sheetRows("users").length === 1 && sheetRows("users")[0][0] === OWNER && sheetRows("users")[0][1] === "admin");
-  check("setup 2 lần: chỉ 1 lịch purge hằng giờ", M.triggers.length === 1 && M.triggers[0].getHandlerFunction() === "purgeExpiredWm");
+  check("setup 2 lần: đúng 2 lịch (purge hằng giờ + BHX 06:00), không trùng",
+    M.triggers.length === 2 && M.triggers.some((t) => t.getHandlerFunction() === "purgeExpiredWm" && t.spec.everyHours === 1)
+    && M.triggers.some((t) => t.getHandlerFunction() === "syncBhxDaily" && t.spec.atHour === 6 && t.spec.everyDays === 1));
   const SECRET = M.props.get("SYNC_SECRET");
   check("setup tạo SYNC_SECRET 64 ký tự", SECRET && SECRET.length === 64);
 
@@ -142,6 +144,44 @@
   check("guard: API trả thiếu (>30% bị coi là đóng) → lỗi, không ghi", /Guard/.test(r.error) && JSON.stringify(sheetRows("bhx_stores")) === before);
   r = call("syncBhx", { secret: SECRET, stores: [{ store_id: "x", lat: "a" }] });
   check("snapshot sai định dạng → lỗi", !!r.error);
+
+  // ---- Tự lấy BHX trên Google (syncBhxDaily) với API BHX giả ----
+  // 2 tỉnh: 1000 có 120 cửa hàng (3 trang, có 1 cửa hàng ảo), 1001 có 30 (1 trang). API cap 50/trang.
+  const mkStore = (id, pid, extra = {}) => ({ storeId: id, lat: 21 + id / 1e5, lng: 105.8, storeAddress: "BHX giả " + id, provinceId: pid, isStoreVirtual: false, ...extra });
+  let API = { 1000: Array.from({ length: 120 }, (_, i) => mkStore(5000 + i, 1000, i === 7 ? { isStoreVirtual: true } : {})),
+              1001: Array.from({ length: 30 }, (_, i) => mkStore(7000 + i, 1001)) };
+  let flaky = {};                                           // url → số lần còn trả lỗi
+  M.fetchHandler = (url) => {
+    if (flaky[url] > 0) { flaky[url]--; return { code: 503, body: "busy" }; }
+    if (url.includes("GetFull")) return { code: 200, body: { data: { provinces: Object.keys(API).map((id) => ({ id: +id, name: "Tỉnh " + id })) } } };
+    const q = Object.fromEntries(new URL(url).searchParams), all = API[q.provinceId] || [];
+    const size = Math.min(+q.pageSize, 50), page = all.slice(+q.pageIndex * size, (+q.pageIndex + 1) * size);
+    return { code: 200, body: { code: 0, data: { stores: page, total: all.length } } };
+  };
+  srvReset = () => { writeAll_("bhx_stores", []); writeAll_("bhx_changes", []); };
+  srvReset();
+  M.fetchLog = [];
+  r = syncBhxDaily();
+  check("syncBhxDaily lần đầu: baseline, 149 cửa hàng (bỏ 1 cửa hàng ảo)", r.baseline === true && r.stores === 149, r);
+  check("số request tối thiểu: 1 GetFull + 2 trang đầu + 2 trang thêm = 5", M.fetchLog.length === 5, M.fetchLog);
+  check("ghi tên tỉnh từ GetFull", sheetRows("bhx_stores").every((row) => /^Tỉnh 100[01]$/.test(row[3])));
+  check("ghi trạng thái lần chạy", /^OK 149 cửa hàng \(API 150\/150/.test(call("settings", { token: (login(OWNER)).token }).data.bhx_last_status));
+  API[1001] = API[1001].slice(1).concat([mkStore(7999, 1001)]);                  // đóng 7000, mở 7999
+  flaky["https://api.bachhoaxanh.com/gw/Location/V2/GetStoresByLocation?provinceId=1000&wardId=0&pageSize=50&pageIndex=1"] = 2;    // lỗi tạm 2 lần → phải thử lại được
+  r = syncBhxDaily();
+  check("ngày 2 (có lỗi mạng tạm thời được thử lại): mở 1 · đóng 1", r.open === 1 && r.close === 1 && !r.baseline, r);
+  flaky["https://api.bachhoaxanh.com/gw/Location/V2/GetStoresByLocation?provinceId=1000&wardId=0&pageSize=50&pageIndex=2"] = 99;   // lỗi mãi
+  let err = null; try { syncBhxDaily(); } catch (e) { err = e.message; }
+  check("request lỗi sau 3 lần → dừng, báo lỗi, không ghi", /API BHX lỗi 1\/2 request/.test(err || ""), err);
+  check("lỗi được ghi vào bhx_last_status", /^LỖI /.test(settings_().bhx_last_status));
+  flaky = {};
+  const before2 = JSON.stringify(sheetRows("bhx_stores"));
+  M.fetchHandler = ((orig) => (url) => {                                         // API báo total 120 nhưng trang 2 rỗng → thiếu 20/150
+    const x = orig(url); if (url.includes("provinceId=1000") && url.endsWith("pageIndex=2")) x.body.data.stores = []; return x;
+  })(M.fetchHandler);
+  err = null; try { syncBhxDaily(); } catch (e) { err = e.message; }
+  check("lấy thiếu > 2% so với tổng API → dừng, không ghi", /Lấy thiếu: 130\/150/.test(err || "") && JSON.stringify(sheetRows("bhx_stores")) === before2, err);
+  check("findStores_ chịu được wrapper khác tên", findStores_({ result: { items: [{ id: 1, latitude: 21, longitude: 105 }] } }).length === 1);
 
   // ---- Thu hồi quyền, nhật ký, đăng xuất ----
   r = call("removeUser", { token: admin.token, email: OWNER });
