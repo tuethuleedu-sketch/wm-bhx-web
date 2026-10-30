@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive, noai, noimageai">
+  <!-- GitHub Pages không cho đặt header → CSP qua thẻ meta. Chỉ cho tải script từ chính trang + 2 CDN, chỉ gọi API Apps Script. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'self'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>WM+ ↔ BHX</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Đăng nhập -->
+  <section id="login" class="login">
+    <form id="login-form" class="card login-card">
+      <h1>WM+ ↔ BHX</h1>
+      <p class="muted">Bản đồ cạnh tranh theo bán kính. Chỉ email đã được Admin cấp quyền mới truy cập được.</p>
+      <label>Email <input id="login-email" type="email" required placeholder="ten@gmail.com" autocomplete="email"></label>
+      <div id="otp-row" hidden>
+        <label>Mã 6 số gửi tới email <input id="login-otp" inputmode="numeric" maxlength="6" placeholder="••••••"></label>
+      </div>
+      <button type="submit" id="login-btn">Gửi mã đăng nhập</button>
+      <p id="login-msg" class="muted small"></p>
+      <button type="button" id="login-reset" class="link" hidden>Đổi email / gửi lại mã</button>
+    </form>
+  </section>
+
+  <!-- Ứng dụng -->
+  <section id="app" hidden>
+    <div id="demo-banner" class="banner" hidden>CHẾ ĐỘ DEMO — toàn bộ cửa hàng là dữ liệu giả, sinh ngẫu nhiên.</div>
+    <header class="topbar">
+      <strong class="brand">WM+ ↔ BHX</strong>
+      <nav id="tabs">
+        <button data-view="overview" class="active">Tổng quan</button>
+        <button data-view="changes">Thay đổi BHX</button>
+        <button data-view="wm" data-admin>WM+ (upload)</button>
+        <button data-view="admin" data-admin>Phân quyền</button>
+      </nav>
+      <span class="user"><span id="user-email"></span> <span id="user-role" class="badge"></span>
+        <button id="logout" class="link">Đăng xuất</button></span>
+    </header>
+
+    <main>
+      <!-- Tổng quan -->
+      <div id="view-overview" class="view">
+        <div class="controls card">
+          <label class="slider">Bán kính <b><span id="r-val">1</span> km</b>
+            <input id="r" type="range" min="0.5" max="5" step="0.5" value="1"></label>
+          <label>Tỉnh <select id="tinh"><option value="">Tất cả</option></select></label>
+          <label>Tìm WM+ <input id="q" placeholder="Mã / tên"></label>
+          <span class="muted small" id="snap-info"></span>
+        </div>
+
+        <div class="kpis">
+          <div class="card kpi"><span>% WM+ có BHX trong R</span><b id="k-cov">–</b><small id="k-cov-sub"></small></div>
+          <div class="card kpi"><span>Số BHX (unique) trong R</span><b id="k-uniq">–</b><small>đếm mỗi BHX 1 lần</small></div>
+          <div class="card kpi"><span>BHX / WM+ bình quân</span><b id="k-avg">–</b><small>tính trùng nếu BHX gần nhiều WM+</small></div>
+          <div class="card kpi"><span>Median BHX gần nhất</span><b id="k-med">–</b><small>không phụ thuộc R</small></div>
+        </div>
+
+        <div class="grid2">
+          <div class="card map-card">
+            <div id="map"></div>
+            <div class="legend small">
+              <span><i class="dot wm-hit"></i>WM+ có BHX trong R</span>
+              <span><i class="dot wm-free"></i>WM+ chưa có BHX trong R</span>
+              <span><i class="dot bhx"></i>BHX trong R</span>
+            </div>
+          </div>
+          <div class="card">
+            <h3>% WM+ có BHX trong R, theo tỉnh</h3>
+            <div id="bars"></div>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><h3>WM+ <span class="muted small" id="wm-count"></span></h3>
+              <button class="ghost" id="exp-wm">Xuất CSV</button></div>
+            <div class="table-wrap"><table id="t-wm"><thead><tr>
+              <th data-k="ma">Mã</th><th data-k="tinh">Tỉnh</th><th data-k="n" class="num">BHX trong R</th><th data-k="near" class="num">Gần nhất (km)</th>
+            </tr></thead><tbody></tbody></table></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Cặp WM+–BHX trong R <span class="muted small" id="pair-count"></span></h3>
+              <button class="ghost" id="exp-pairs">Xuất CSV</button></div>
+            <p class="muted small" id="pair-hint">Bấm 1 WM+ (bảng hoặc bản đồ) để xem BHX quanh cửa hàng đó.</p>
+            <div class="table-wrap"><table id="t-pairs"><thead><tr>
+              <th>Mã WM+</th><th>Mã BHX</th><th>Địa chỉ BHX</th><th class="num">Km</th>
+            </tr></thead><tbody></tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thay đổi BHX -->
+      <div id="view-changes" class="view" hidden>
+        <div class="controls card">
+          <label>Loại <select id="c-type"><option value="">Tất cả</option><option value="open">Mở mới</option><option value="close">Đóng cửa</option><option value="move">Dời vị trí</option></select></label>
+          <label>Từ ngày <input id="c-from" type="date"></label>
+          <label>Tỉnh <select id="c-tinh"><option value="">Tất cả</option></select></label>
+          <button class="ghost" id="exp-changes">Xuất CSV</button>
+        </div>
+        <div class="kpis" id="c-kpis"></div>
+        <div class="card"><div class="table-wrap tall"><table id="t-changes"><thead><tr>
+          <th>Ngày phát hiện</th><th>Loại</th><th>Mã BHX</th><th>Địa chỉ</th><th>Tỉnh</th><th class="num">WM+ trong 2 km</th><th class="num">WM+ gần nhất (km)</th>
+        </tr></thead><tbody></tbody></table></div></div>
+      </div>
+
+      <!-- Upload WM+ -->
+      <div id="view-wm" class="view" hidden>
+        <div class="card">
+          <h3>Cập nhật danh sách WM+</h3>
+          <p class="muted">File Excel (.xlsx/.xls/.csv). Tự dò dòng tiêu đề trong 8 dòng đầu. Cột bắt buộc (một trong các tên):
+            <b>Mã</b> <code>Mã WM+ / Mã CH / Mã SAP / Code</code> · <b>Tỉnh</b> <code>Tỉnh mới / Tỉnh/Thành / Tỉnh/TP / Tỉnh/TP cũ trước 1/7 / Tỉnh</code> ·
+            <b>Vĩ độ</b> <code>Latitude / Vĩ độ / Lat</code> · <b>Kinh độ</b> <code>Longitude / Kinh độ / Lng / Long</code>; tuỳ chọn <b>Tên</b> <code>Tên WM+ / Tên CH / Tên cửa hàng</code>.</p>
+          <p class="muted small">File được đọc ngay trên trình duyệt; chỉ 5 cột trên được gửi lên khi bạn bấm <b>Áp dụng</b>. Dữ liệu tự xoá sau 48 giờ.</p>
+          <div class="controls">
+            <label>File <input type="file" id="up-file" accept=".xlsx,.xls,.csv"></label>
+            <label>Sheet <select id="up-sheet" disabled></select></label>
+          </div>
+          <div id="up-result" hidden>
+            <p id="up-map" class="small"></p>
+            <div class="kpis" id="up-kpis"></div>
+            <div id="up-issues"></div>
+            <div id="up-diff"></div>
+            <div class="controls"><button id="up-apply">Áp dụng</button><button class="ghost" id="up-cancel">Huỷ</button>
+              <span id="up-msg" class="small"></span></div>
+          </div>
+        </div>
+        <div class="card"><h3>Lịch sử phiên bản</h3><div class="table-wrap"><table id="t-versions"><thead><tr>
+          <th>Phiên bản</th><th>Thời điểm</th><th>Người upload</th><th class="num">Số WM+</th><th class="num">Thêm</th><th class="num">Bỏ</th><th class="num">Dời</th><th>Trạng thái (tự xoá sau 48 giờ)</th>
+        </tr></thead><tbody></tbody></table></div></div>
+      </div>
+
+      <!-- Phân quyền -->
+      <div id="view-admin" class="view" hidden>
+        <div class="card">
+          <h3>Email được truy cập</h3>
+          <form id="add-user" class="controls">
+            <label>Email <input id="u-email" type="email" required placeholder="dongnghiep@gmail.com"></label>
+            <label>Quyền <select id="u-role"><option value="viewer">Viewer — xem, lọc, xuất CSV</option><option value="admin">Admin — thêm upload WM+, phân quyền</option></select></label>
+            <button type="submit">Cấp quyền</button>
+          </form>
+          <p class="muted small" id="u-msg"></p>
+          <label class="check"><input type="checkbox" id="s-export"> Viewer được bấm "Xuất CSV"</label>
+          <div class="table-wrap"><table id="t-users"><thead><tr><th>Email</th><th>Quyền</th><th>Ngày cấp</th><th></th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Nhật ký truy cập <span class="muted small">(500 lượt gần nhất; không ai sửa/xoá được)</span></h3>
+            <button class="ghost" id="log-refresh">Tải lại</button></div>
+          <div class="table-wrap"><table id="t-log"><thead><tr><th>Thời điểm</th><th>Email</th><th>Sự kiện</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="config.js"></script>
+  <script src="demo-data.js"></script>
+  <script src="gas-api.js"></script>
+  <script src="upload.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
