@@ -1,0 +1,21 @@
+# KHÔNG đưa dữ liệu thật lên GitHub
+*.xlsx
+*.xls
+*.csv
+data/
+output/
+logs/
+release/
+HANDOFF.md
+powerbi/
+archive_supabase/
+.env
+*.env
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+
+# Claude Code (cấu hình cục bộ)
+.claude/
