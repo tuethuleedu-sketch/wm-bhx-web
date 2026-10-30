@@ -4,9 +4,11 @@
   const CFG = window.APP_CONFIG;
   if (CFG.mode !== "gas") return;
   const KEY = "wmbhx_token";
-  const store = {                                       // sessionStorage: đóng tab là phải đăng nhập lại
-    get() { try { return sessionStorage.getItem(KEY); } catch (_) { return null; } },
-    set(v) { try { v ? sessionStorage.setItem(KEY, v) : sessionStorage.removeItem(KEY); } catch (_) {} },
+  const store = {                                       // localStorage: nhớ đăng nhập trên máy này tới khi Đăng xuất / hết 30 ngày
+    get() { try { return localStorage.getItem(KEY) || sessionStorage.getItem(KEY); } catch (_) { return null; } },
+    set(v) {
+      try { sessionStorage.removeItem(KEY); v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (_) {}
+    },
   };
   let token = store.get();
 
