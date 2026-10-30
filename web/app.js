@@ -39,7 +39,9 @@
   let map, wmMarkers = [], bhxLayer, ringLayer;
   function initMap() {
     map = L.map("map", { preferCanvas: true }).setView([20.8, 106.2], 9);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+    // OSM chặn tile (403) nếu thiếu Referer; trang đặt no-referrer → riêng tile gửi origin (chỉ tên miền, không đường dẫn).
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 18, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
     bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map);
   }
   function buildWmMarkers() {                         // gọi lại mỗi khi danh sách WM+ đổi (upload)
