@@ -22,7 +22,7 @@ const CFG = {
   OTP_MAX_TRY: 5,            // nhập sai 5 lần → huỷ mã
   OTP_MIN_GAP_S: 60,         // 1 email chỉ xin mã 1 lần/phút
   OTP_MAX_PER_DAY: 80,       // trần toàn hệ thống/ngày (Gmail cá nhân gửi ~100 mail/ngày qua Apps Script)
-  SESSION_TTL_S: 21600,      // phiên đăng nhập 6 giờ (trần của CacheService)
+  SESSION_DAYS: 30,          // phiên đăng nhập 30 ngày, tự gia hạn khi còn dùng (lưu ở Script Properties)
   WM_TTL_H: 48,              // WM+ tự xoá sau 48 giờ
   MOVE_KM: 0.05,             // dời > 50 m mới tính là dời vị trí
   MAX_CLOSE_RATIO: 0.30,     // guard đồng bộ BHX
@@ -68,7 +68,7 @@ function route_(req) {
   // Cần đăng nhập
   const u = session_(req.token);
   if (a === 'me') { log_(u.email, 'resume', true); return u; }
-  if (a === 'logout') { CacheService.getScriptCache().remove('sess:' + sha_(String(req.token))); log_(u.email, 'logout'); return true; }
+  if (a === 'logout') { PropertiesService.getScriptProperties().deleteProperty('sess:' + sha_(String(req.token))); log_(u.email, 'logout'); return true; }
   if (a === 'snapshot') return snapshot_();
   if (a === 'changes') return changes_();
   if (a === 'settings') return settings_();
@@ -184,19 +184,41 @@ function verifyOtp_(emailRaw, codeRaw) {
   const role = roleOf_(email);
   if (!role) { log_(email, 'denied'); throw new Error('Email này chưa được Admin cấp quyền truy cập.'); }
   const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
-  cache.put('sess:' + sha_(token), email, CFG.SESSION_TTL_S);     // chỉ lưu hash của token
+  putSession_(sha_(token), email);                                  // chỉ lưu hash của token
   log_(email, 'login');
   return { token: token, email: email, role: role };
+}
+
+function putSession_(h, email) {
+  PropertiesService.getScriptProperties().setProperty('sess:' + h,
+    JSON.stringify({ e: email, x: Date.now() + CFG.SESSION_DAYS * 864e5 }));
 }
 
 // Kiểm tra quyền MỖI lần gọi → thu hồi quyền có hiệu lực ngay.
 function session_(token) {
   if (!token) throw err_('Chưa đăng nhập', 'AUTH');
-  const email = CacheService.getScriptCache().get('sess:' + sha_(String(token)));
-  if (!email) throw err_('Phiên đăng nhập đã hết hạn — đăng nhập lại', 'AUTH');
-  const role = roleOf_(email);
-  if (!role) throw err_('Quyền truy cập đã bị thu hồi', 'AUTH');
-  return { email: email, role: role };
+  const h = sha_(String(token)), props = PropertiesService.getScriptProperties();
+  let s = null;
+  try { s = JSON.parse(props.getProperty('sess:' + h) || 'null'); } catch (_) {}
+  if (!s || s.x < Date.now()) {
+    if (s) props.deleteProperty('sess:' + h);
+    throw err_('Phiên đăng nhập đã hết hạn — đăng nhập lại', 'AUTH');
+  }
+  const role = roleOf_(s.e);
+  if (!role) { props.deleteProperty('sess:' + h); throw err_('Quyền truy cập đã bị thu hồi', 'AUTH'); }
+  if (s.x - Date.now() < (CFG.SESSION_DAYS - 1) * 864e5) putSession_(h, s.e);   // gia hạn tối đa 1 lần/ngày
+  return { email: s.e, role: role };
+}
+
+// Dọn phiên hết hạn (gọi từ lịch hằng giờ).
+function purgeSessions_() {
+  const props = PropertiesService.getScriptProperties(), all = props.getProperties(), now = Date.now();
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('sess:') !== 0) return;
+    let s = null;
+    try { s = JSON.parse(all[k]); } catch (_) {}
+    if (!s || s.x < now) props.deleteProperty(k);
+  });
 }
 
 function log_(email, event, throttle) {
@@ -335,6 +357,7 @@ function purgeExpiredWm() {
     });
     if (changed) writeAll_('wm_versions', all);
   });
+  purgeSessions_();
 }
 
 // ───────────────────────── Đồng bộ BHX ─────────────────────────
