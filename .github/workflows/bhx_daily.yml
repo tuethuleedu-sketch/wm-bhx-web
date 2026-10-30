@@ -1,0 +1,34 @@
+# Kéo danh sách BHX mỗi sáng và gửi lên Google Sheet qua Apps Script.
+# Cần 2 secret trong repo (Settings → Secrets and variables → Actions):
+#   GAS_URL       https://script.google.com/macros/s/…/exec
+#   SYNC_SECRET   in ra khi chạy setup() trong Apps Script — KHÔNG đưa vào code
+name: BHX daily sync
+
+on:
+  schedule:
+    - cron: "0 23 * * *"        # 23:00 UTC = 06:00 giờ Việt Nam
+  workflow_dispatch:             # nút "Run workflow" để chạy tay
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bhx-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Fetch BHX + sync Google Sheet
+        env:
+          GAS_URL: ${{ secrets.GAS_URL }}
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+        run: python bhx_sync.py
