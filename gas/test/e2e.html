@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>E2E web + Code.gs (giả lập)</title>
+<!-- Mở web/index.html ở mode "gas", nhưng mọi lời gọi Apps Script được chuyển vào Code.gs chạy trên Google giả lập (mock_gas.js). -->
+<script>
+(async () => {
+  const boot = `<script src="/gas/test/mock_gas.js"><\/script><script>
+    APP_CONFIG.mode = "gas"; APP_CONFIG.gasUrl = "mock://gas";
+    (function () { const x = new XMLHttpRequest(); x.open("GET", "/gas/Code.gs", false); x.send(); (0, eval)(x.responseText); })();
+    const realFetch = window.fetch.bind(window);
+    window.__calls = [];
+    window.fetch = async (url, opt) => {
+      if (url !== "mock://gas") return realFetch(url, opt);
+      const body = JSON.parse(opt.body); window.__calls.push(body.action);
+      await new Promise((r) => setTimeout(r, 30));                 // giả độ trễ mạng
+      const res = gasCall(opt.body);
+      return { ok: true, status: 200, json: async () => res };
+    };
+  <\/script>`;
+  let html = await (await fetch("/web/index.html")).text();
+  html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")   // CSP chặn script chèn thêm của trang test
+    .replace("<head>", '<head><base href="/web/">')
+    .replace('<script src="config.js"><\/script>', '<script src="config.js"><\/script>' + boot);
+  document.open(); document.write(html); document.close();
+})();
+</script>

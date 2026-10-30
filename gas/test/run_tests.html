@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><title>Test Code.gs</title>
+<style>body{font:13px/1.5 Consolas,monospace;padding:16px;background:#fff;color:#111} .ok{color:#2f9e44} .fail{color:#c92a2a;font-weight:700} h2{font:600 15px system-ui}</style></head>
+<body>
+<h2>Test backend gas/Code.gs trên môi trường Google giả lập (dữ liệu giả)</h2>
+<pre id="out"></pre>
+<script src="mock_gas.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById("out"), M = window.__gas;
+  let pass = 0, fail = 0;
+  const check = (name, cond, extra) => { cond ? pass++ : fail++; out.innerHTML += `<span class="${cond ? "ok" : "fail"}">${cond ? "[OK]  " : "[FAIL]"}</span> ${name}${!cond && extra !== undefined ? "  → " + JSON.stringify(extra).slice(0, 300) : ""}\n`; };
+  // nạp Code.gs vào global; ?src=… để test bản đã nén (SHEET_ID đặt về '' để dùng Sheet giả lập)
+  const src = new URLSearchParams(location.search).get("src") || "../Code.gs";
+  (0, eval)((await (await fetch(src)).text()).replace(/const SHEET_ID\s*=\s*'[^']*'/, "const SHEET_ID=''"));
+
+  const call = (action, p = {}) => gasCall({ action, ...p });
+  const login = (email) => { M.cache.delete("otpgap:" + email); call("requestOtp", { email }); return call("verifyOtp", { email, code: lastOtp(email) }).data; };
+  const sheetRows = (n) => SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n).getDataRange().getValues().slice(1).filter((r) => r.some((x) => x !== ""));
+  const OWNER = "owner@gmail.com";
+
+  // ---- setup ----
+  setup(); setup();
+  check("setup tạo đủ 6 tab", ["users", "settings", "wm_versions", "bhx_stores", "bhx_changes", "access_log"].every((n) => SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n)));
+  check("setup 2 lần: vẫn 1 Admin (chủ Sheet, viết thường)", sheetRows("users").length === 1 && sheetRows("users")[0][0] === OWNER && sheetRows("users")[0][1] === "admin");
+  check("setup 2 lần: chỉ 1 lịch purge hằng giờ", M.triggers.length === 1 && M.triggers[0].getHandlerFunction() === "purgeExpiredWm");
+  const SECRET = M.props.get("SYNC_SECRET");
+  check("setup tạo SYNC_SECRET 64 ký tự", SECRET && SECRET.length === 64);
+
+  // ---- OTP ----
+  let r = call("requestOtp", { email: "la@gmail.com" });
+  check("email lạ: trả 'sent' giống hệt (không lộ email nào có quyền)", r.ok && r.data.sent === true);
+  check("email lạ: KHÔNG gửi mail", M.mails.length === 0);
+  r = call("requestOtp", { email: "la@gmail.com" });
+  check("xin mã 2 lần/phút → chặn", !!r.error && /1 phút/.test(r.error));
+  r = call("requestOtp", { email: "  OWNER@gmail.com " });
+  check("email có quyền (viết hoa, có khoảng trắng) → gửi mail", r.ok && M.mails.length === 1 && M.mails[0].to === OWNER);
+  const code = lastOtp(OWNER);
+  for (let i = 0; i < 5; i++) r = call("verifyOtp", { email: OWNER, code: "000000" === code ? "111111" : "000000" });
+  check("nhập sai mã → báo lỗi", !!r.error);
+  r = call("verifyOtp", { email: OWNER, code });
+  check("sai 5 lần → mã bị huỷ, mã đúng cũng không dùng được", !!r.error);
+  r = call("requestOtp", { email: "khong-phai-email" });
+  check("email sai định dạng → lỗi", !!r.error);
+  const admin = login(OWNER);
+  check("đăng nhập đúng mã → có token + role admin", admin && admin.token && admin.token.length === 64 && admin.role === "admin");
+  r = call("verifyOtp", { email: OWNER, code: lastOtp(OWNER) });
+  check("mã OTP chỉ dùng được 1 lần", !!r.error);
+  check("token chỉ lưu dạng băm trong cache", ![...M.cache.keys()].some((k) => k.includes(admin.token)));
+
+  // ---- Phiên + quyền ----
+  r = call("snapshot");
+  check("không token → lỗi AUTH", r.code === "AUTH");
+  r = call("snapshot", { token: "abc" });
+  check("token bịa → lỗi AUTH", r.code === "AUTH");
+  r = call("snapshot", { token: admin.token });
+  check("admin đọc snapshot (chưa có WM+)", r.ok && r.data.wm.length === 0 && r.data.wmVersion === "chưa có");
+  r = gasCall("{không phải json");
+  check("body không phải JSON → lỗi, không crash", !!r.error);
+  r = call("xoaHet", { token: admin.token });
+  check("thao tác lạ → lỗi", !!r.error);
+
+  r = call("addUser", { token: admin.token, email: "Viewer@Gmail.com", role: "viewer" });
+  check("admin cấp quyền viewer", r.ok);
+  r = call("addUser", { token: admin.token, email: "viewer@gmail.com", role: "viewer" });
+  check("cấp trùng email → lỗi", /đã có/.test(r.error));
+  r = call("addUser", { token: admin.token, email: "x@gmail.com", role: "superadmin" });
+  check("quyền bịa → lỗi", !!r.error);
+  const viewer = login("viewer@gmail.com");
+  check("viewer đăng nhập", viewer && viewer.role === "viewer");
+  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "setSetting", "addUser", "removeUser"]) {
+    r = call(a, { token: viewer.token, email: "a@b.co", role: "admin", rows: [], key: "viewer_can_export", value: false });
+    check(`viewer KHÔNG gọi được ${a}`, /Chỉ Admin/.test(r.error), r);
+  }
+  check("viewer đọc settings", call("settings", { token: viewer.token }).data.viewer_can_export === true);
+  r = call("setSetting", { token: admin.token, key: "SYNC_SECRET", value: "x" });
+  check("setSetting key lạ → lỗi", !!r.error);
+  call("setSetting", { token: admin.token, key: "viewer_can_export", value: false });
+  check("admin tắt Viewer xuất CSV", call("settings", { token: viewer.token }).data.viewer_can_export === false);
+
+  // ---- Upload WM+ ----
+  const W1 = [{ ma: "S1", ten: "a", tinh: "T", lat: 20.8, lng: 106.2 }, { ma: "S2", ten: "b", tinh: "T", lat: 20.9, lng: 106.3 }];
+  const W2 = [{ ma: "S1", ten: "a", tinh: "T", lat: 20.801, lng: 106.2 }, { ma: "S3", tinh: "T", lat: 21.0, lng: 106.0 }];
+  r = call("publishWm", { token: admin.token, rows: [{ ma: "D", lat: 20.8, lng: 106.2 }, { ma: "D", lat: 20.8, lng: 106.2 }] });
+  check("upload trùng mã → lỗi, không tạo file", /Trùng mã/.test(r.error) && Object.keys(M.files).length === 0);
+  r = call("publishWm", { token: admin.token, rows: [{ ma: "B", lat: 0, lng: 0 }] });
+  check("upload toạ độ ngoài VN → lỗi", /ngoài lãnh thổ/.test(r.error));
+  r = call("publishWm", { token: admin.token, rows: [] });
+  check("upload rỗng → lỗi", !!r.error);
+  r = call("publishWm", { token: admin.token, rows: W1 });
+  check("upload lần 1: v1, 2 dòng, thêm 2", r.ok && r.data.version === "v1" && r.data.rows === 2 && r.data.added === 2, r);
+  r = call("publishWm", { token: admin.token, rows: W2 });
+  check("upload lần 2: thêm 1 · bỏ 1 · dời 1", r.ok && r.data.added === 1 && r.data.removed === 1 && r.data.moved === 1, r);
+  check("mỗi lần upload = 1 file Sheet riêng", Object.keys(M.files).length === 2);
+  r = call("snapshot", { token: viewer.token });
+  check("viewer thấy WM+ bản mới nhất (S1, S3) + hạn xoá", r.ok && r.data.wm.map((w) => w.ma).sort().join() === "S1,S3" && !!r.data.wmExpires);
+  check("thiếu tên → dùng mã làm tên", r.data.wm.find((w) => w.ma === "S3").ten === "S3");
+
+  // ---- Hết hạn 48 giờ ----
+  const vs = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("wm_versions");
+  vs.data[2][2] = new Date(Date.now() - 49 * 3600e3).toISOString();      // v2 upload 49 giờ trước
+  vs.data[1][2] = new Date(Date.now() - 47 * 3600e3).toISOString();      // v1: 47 giờ (nhưng không còn là bản hiện hành)
+  r = call("snapshot", { token: admin.token });
+  check("quá 48h: snapshot KHÔNG trả WM+ ngay (chưa cần chờ job xoá)", r.ok && r.data.wm.length === 0);
+  purgeExpiredWm();
+  const v2file = vs.data[2][4], v1file = vs.data[1][4];
+  check("job xoá: file v2 bị xoá VĨNH VIỄN (Drive.Files.remove)", M.removed.includes(v2file) && !M.files[v2file]);
+  check("job xoá: KHÔNG đụng file v1 còn hạn", !!M.files[v1file]);
+  check("job xoá: ghi purged_at cho v2", !!vs.data[2][10]);
+  r = call("versions", { token: admin.token });
+  check("lịch sử phiên bản: v2 'Đã xoá', v1 'Còn hạn'", r.data[0].status.startsWith("Đã xoá") && r.data[1].status.startsWith("Còn hạn"), r.data);
+  vs.data[1][2] = new Date(Date.now() - 50 * 3600e3).toISOString();
+  M.driveRemoveFails = true; purgeExpiredWm(); M.driveRemoveFails = false;
+  check("Drive API chưa bật → chuyển vào thùng rác + ghi chú cảnh báo", M.trashed.includes(v1file) && /thùng rác/.test(vs.data[1][11]));
+  purgeExpiredWm();
+  check("chạy job lần nữa: không xoá lại bản đã xoá", M.removed.length === 1);
+
+  // ---- Đồng bộ BHX ----
+  const snap = (...s) => s.map(([id, lat, lng]) => ({ store_id: id, dia_chi: "BHX " + id, province_id: 1000, tinh: "Hà Nội", lat, lng }));
+  const S0 = snap(...Array.from({ length: 10 }, (_, i) => [i + 1, 21 + (i + 1) / 1000, 105.8]));
+  r = call("syncBhx", { secret: "sai", stores: S0 });
+  check("sai SYNC_SECRET → lỗi", /SYNC_SECRET/.test(r.error));
+  r = call("syncBhx", { secret: SECRET, stores: S0 });
+  check("lần đầu = baseline, 0 thay đổi", r.ok && r.data.baseline === true && sheetRows("bhx_changes").length === 0, r);
+  const S1 = snap([1, 21.002, 105.8], [2, 21.0021, 105.8], ...Array.from({ length: 7 }, (_, i) => [i + 3, 21 + (i + 3) / 1000, 105.8]), [11, 21.5, 105.9]);
+  r = call("syncBhx", { secret: SECRET, stores: S1, dryRun: true });
+  check("dry-run: mở 1 · đóng 1 · dời 1, không ghi", r.data.open === 1 && r.data.close === 1 && r.data.move === 1 && sheetRows("bhx_changes").length === 0, r);
+  r = call("syncBhx", { secret: SECRET, stores: S1 });
+  check("ngày 2: mở 1 · đóng 1 · dời 1 (dời 11 m không tính)", r.data.open === 1 && r.data.close === 1 && r.data.move === 1, r);
+  r = call("changes", { token: viewer.token });
+  check("viewer thấy 3 thay đổi đúng loại", r.data.length === 3 && ["open:11", "close:10", "move:1"].every((k) => r.data.some((c) => c.type + ":" + c.ma === k)), r.data);
+  check("bản ghi 'dời' giữ toạ độ cũ", r.data.find((c) => c.type === "move").old_lat === 21.001);
+  r = call("snapshot", { token: viewer.token });
+  check("snapshot chỉ trả BHX đang mở (10)", r.data.bhx.length === 10 && !r.data.bhx.some((b) => b.ma === 10));
+  check("ghi giờ cập nhật BHX", /^\d{4}-\d\d-\d\d \d\d:\d\d$/.test(r.data.bhxUpdated));
+  const S2 = snap([1, 21.002, 105.8], [2, 21.0021, 105.8], ...Array.from({ length: 8 }, (_, i) => [i + 3, 21 + (i + 3) / 1000, 105.8]), [11, 21.5, 105.9]);
+  r = call("syncBhx", { secret: SECRET, stores: S2 });
+  check("ngày 3: cửa hàng mở lại tính 'mở mới'", r.data.open === 1 && r.data.close === 0, r);
+  const before = JSON.stringify(sheetRows("bhx_stores"));
+  r = call("syncBhx", { secret: SECRET, stores: snap([1, 21.002, 105.8], [2, 21.0021, 105.8], [3, 21.003, 105.8]) });
+  check("guard: API trả thiếu (>30% bị coi là đóng) → lỗi, không ghi", /Guard/.test(r.error) && JSON.stringify(sheetRows("bhx_stores")) === before);
+  r = call("syncBhx", { secret: SECRET, stores: [{ store_id: "x", lat: "a" }] });
+  check("snapshot sai định dạng → lỗi", !!r.error);
+
+  // ---- Thu hồi quyền, nhật ký, đăng xuất ----
+  r = call("removeUser", { token: admin.token, email: OWNER });
+  check("admin KHÔNG tự thu hồi mình", /chính mình/.test(r.error));
+  r = call("removeUser", { token: admin.token, email: "viewer@gmail.com" });
+  check("admin thu hồi viewer", r.ok);
+  r = call("snapshot", { token: viewer.token });
+  check("viewer bị thu hồi → token mất hiệu lực NGAY", r.code === "AUTH");
+  r = call("accessLog", { token: admin.token });
+  const ev = r.data.map((x) => x.event + ":" + x.email);
+  check("nhật ký có login + denied", ev.includes("login:" + OWNER) && ev.includes("denied:la@gmail.com"), ev);
+  check("nhật ký mới nhất ở trên", r.data[0].at >= r.data[r.data.length - 1].at);
+  call("logout", { token: admin.token });
+  check("đăng xuất → token hết hiệu lực", call("snapshot", { token: admin.token }).code === "AUTH");
+  check("doGet không trả dữ liệu", JSON.parse(doGet().getContent()).service === "wm-bhx");
+
+  out.innerHTML += `\nKẾT QUẢ: ${fail ? fail + " lỗi" : "TẤT CẢ ĐẠT"} (${pass}/${pass + fail})`;
+  document.title = fail ? "FAIL" : "PASS";
+  window.__result = { pass, fail };
+})().catch((e) => { document.getElementById("out").innerHTML += `<span class="fail">LỖI CHẠY TEST: ${e.stack}</span>`; window.__result = { error: String(e) }; });
+</script>
+</body>
+</html>
