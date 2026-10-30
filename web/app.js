@@ -33,10 +33,13 @@
     }
   }
   const countIn = (list, R) => { let k = 0; while (k < list.length && list[k][1] <= R) k++; return k; };
-  const scopeIdx = () => S.wm.map((_, i) => i).filter((i) => !S.tinh || S.wm[i].tinh === S.tinh);
+  // Khoá tỉnh: bỏ dấu, bỏ tiền tố "Tỉnh/TP./Thành phố" → "TP. Hồ Chí Minh" (BHX) khớp "Hồ Chí Minh" (file WM+).
+  const provKey = (t) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase()
+    .replace(/^\s*(thanh pho|tinh|tp\.?)\s*/, "").replace(/[^a-z0-9]/g, "").replace(/^hcm$/, "hochiminh");
+  const scopeIdx = () => S.wm.map((_, i) => i).filter((i) => !S.tinh || provKey(S.wm[i].tinh) === S.tinh);
 
   // ---------- Bản đồ ----------
-  let map, wmMarkers = [], bhxLayer, ringLayer, bhxAllLayer;
+  let map, wmMarkers = [], bhxLayer, ringLayer, bhxAllLayer, bhxAllMarkers = [];
   function initMap() {
     map = L.map("map", { preferCanvas: true }).setView([20.8, 106.2], 9);
     // OSM chặn tile (403) nếu thiếu Referer; trang đặt no-referrer → riêng tile gửi origin (chỉ tên miền, không đường dẫn).
@@ -44,12 +47,33 @@
       { maxZoom: 18, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
     bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map);
   }
-  // Lớp nền: toàn bộ BHX đang mở (chấm xám nhỏ) — luôn hiện, kể cả khi chưa có WM+.
+  // Lớp nền: toàn bộ BHX đang mở (chấm xám nhỏ) — luôn hiện, kể cả khi chưa có WM+; lọc theo tỉnh đang chọn.
   function buildBhxAll() {
     if (bhxAllLayer) bhxAllLayer.remove();
-    bhxAllLayer = L.layerGroup(S.bhx.map((b) => L.circleMarker([b.lat, b.lng],
+    bhxAllMarkers = S.bhx.map((b) => L.circleMarker([b.lat, b.lng],
       { radius: 2.5, weight: 0, fillColor: getVar("--bhx-all"), fillOpacity: 0.7 })
-      .bindTooltip(`<b>BHX ${esc(b.ma)}</b><br>${esc(b.dia_chi)}`))).addTo(map);   // thêm trước WM+ → nằm dưới
+      .bindTooltip(`<b>BHX ${esc(b.ma)}</b> · ${esc(b.tinh)}<br>${esc(b.dia_chi)}`));
+    bhxAllLayer = L.layerGroup().addTo(map);          // thêm trước WM+ → nằm dưới
+  }
+  function renderBhxAll() {
+    bhxAllLayer.clearLayers();
+    S.bhx.forEach((b, j) => { if (!S.tinh || provKey(b.tinh) === S.tinh) bhxAllLayer.addLayer(bhxAllMarkers[j]); });
+  }
+  // Thu phóng vừa tỉnh đang chọn (WM+ + BHX); không lọc → vừa WM+, chưa có WM+ thì vừa toàn bộ BHX.
+  function fitScope() {
+    const inP = (x) => !S.tinh || provKey(x.tinh) === S.tinh;
+    let pts = S.wm.filter(inP);
+    if (S.tinh) pts = pts.concat(S.bhx.filter(inP)); else if (!pts.length) pts = S.bhx;
+    if (pts.length) map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [20, 20], maxZoom: 14 });
+  }
+  // Bộ lọc tỉnh: hợp các tỉnh có WM+ hoặc có BHX, kèm số cửa hàng mỗi bên.
+  function fillProvinces() {
+    const P = new Map();
+    const add = (t, k) => { const key = provKey(t); if (!key) return; if (!P.has(key)) P.set(key, { name: String(t).replace(/^\s*(tỉnh|thành phố|tp\.?)\s*/i, ""), wm: 0, bhx: 0 }); P.get(key)[k]++; };
+    S.wm.forEach((w) => add(w.tinh, "wm"));           // tên theo file WM+ được ưu tiên hiển thị
+    S.bhx.forEach((b) => add(b.tinh, "bhx"));
+    $("#tinh").innerHTML = `<option value="">Tất cả</option>` + [...P].sort((a, b) => a[1].name.localeCompare(b[1].name, "vi"))
+      .map(([k, p]) => `<option value="${esc(k)}">${esc(p.name)} (${fmt(p.wm)} WM+ · ${fmt(p.bhx)} BHX)</option>`).join("");
   }
   function buildWmMarkers() {                         // gọi lại mỗi khi danh sách WM+ đổi (upload)
     wmMarkers.forEach((mk) => mk.remove());
@@ -63,7 +87,7 @@
       if (!inScope.has(i)) { mk.remove(); return; }
       mk.addTo(map).setStyle({ fillColor: S.near[i] <= S.R ? getVar("--wm-hit") : getVar("--wm-free"), radius: S.sel === i ? 9 : 5 });
     });
-    bhxLayer.clearLayers(); ringLayer.clearLayers();
+    renderBhxAll(); bhxLayer.clearLayers(); ringLayer.clearLayers();
     const src = S.sel != null ? [S.sel] : scope, seen = new Set();
     src.forEach((i) => S.pairsBy[i].forEach(([j, d]) => {
       if (d > S.R || seen.has(j)) return; seen.add(j);
@@ -100,7 +124,7 @@
     const by = {};
     S.wm.forEach((w, i) => { (by[w.tinh] ||= [0, 0]); by[w.tinh][1]++; if (S.near[i] <= R) by[w.tinh][0]++; });
     $("#bars").innerHTML = Object.entries(by).sort((a, b) => b[1][0] / b[1][1] - a[1][0] / a[1][1]).map(([t, [c, n]]) =>
-      `<div class="bar-row${t === S.tinh ? " sel" : ""}" data-t="${esc(t)}" title="${c}/${n} WM+"><span class="bar-name">${esc(t)}</span>
+      `<div class="bar-row${provKey(t) === S.tinh ? " sel" : ""}" data-t="${esc(provKey(t))}" title="${c}/${n} WM+"><span class="bar-name">${esc(t)}</span>
        <div class="bar-track"><div class="bar-fill" style="width:${(c / n) * 100}%"></div></div><span class="bar-val">${pct(c / n)}</span></div>`).join("");
 
     renderWmTable(scope); renderPairs(scope); renderMap(scope);
@@ -215,13 +239,9 @@
     $("#snap-info").textContent = `${fmt(S.wm.length)} WM+ (${snap.wmVersion}`
       + (snap.wmExpires ? `, tự xoá ${snap.wmExpires.toLocaleString("vi-VN")} — còn ${fmt(Math.max(left, 0), 0)} giờ` : "")
       + `) · ${fmt(S.bhx.length)} BHX, cập nhật ${snap.bhxUpdated}`;
-    computeAll();
-    const ts = [...new Set(S.wm.map((w) => w.tinh))].sort();
-    $("#tinh").innerHTML = `<option value="">Tất cả</option>` + ts.map((t) => `<option>${esc(t)}</option>`).join("");
-    buildBhxAll(); buildWmMarkers(); renderOverview();
-    const pts = (S.wm.length ? S.wm : S.bhx).map((w) => [w.lat, w.lng]);   // chưa có WM+ → nhìn toàn bộ BHX
-    if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [20, 20] });
-    else $("#snap-info").textContent = "Chưa có dữ liệu WM+ (chưa upload hoặc đã tự xoá sau 48 giờ) — Admin vào tab WM+ (upload) để tải file lên.";
+    computeAll(); fillProvinces();
+    buildBhxAll(); buildWmMarkers(); renderOverview(); fitScope();
+    if (!S.wm.length && !S.bhx.length) $("#snap-info").textContent = "Chưa có dữ liệu WM+ (chưa upload hoặc đã tự xoá sau 48 giờ) — Admin vào tab WM+ (upload) để tải file lên.";
     loadChanges();
   }
 
@@ -322,11 +342,11 @@
   $("#logout").addEventListener("click", async () => { await API.signOut(); location.reload(); });
   $("#tabs").addEventListener("click", (e) => { if (e.target.dataset.view) show(e.target.dataset.view); });
   $("#r").addEventListener("input", (e) => { S.R = +e.target.value; $("#r-val").textContent = fmt(S.R, S.R % 1 ? 1 : 0); renderOverview(); });
-  $("#tinh").addEventListener("change", (e) => { S.tinh = e.target.value; S.sel = null; renderOverview(); });
+  $("#tinh").addEventListener("change", (e) => { S.tinh = e.target.value; S.sel = null; renderOverview(); fitScope(); });
   $("#q").addEventListener("input", (e) => { S.q = e.target.value; renderWmTable(scopeIdx()); });
   $("#bars").addEventListener("click", (e) => {
     const r = e.target.closest(".bar-row"); if (!r) return;
-    S.tinh = S.tinh === r.dataset.t ? "" : r.dataset.t; $("#tinh").value = S.tinh; S.sel = null; renderOverview();
+    S.tinh = S.tinh === r.dataset.t ? "" : r.dataset.t; $("#tinh").value = S.tinh; S.sel = null; renderOverview(); fitScope();
   });
   $("#t-wm").addEventListener("click", (e) => {
     const th = e.target.closest("th[data-k]");
