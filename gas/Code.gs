@@ -346,8 +346,13 @@ function safeEq_(a, b) {
   return d === 0;
 }
 
+// Đẩy snapshot từ ngoài vào (bhx_sync.py — dự phòng khi không chạy được syncBhxDaily).
 function syncBhx_(secret, storesRaw, dryRun) {
   if (!safeEq_(secret, PropertiesService.getScriptProperties().getProperty('SYNC_SECRET'))) throw new Error('Sai SYNC_SECRET');
+  return syncBhxCore_(storesRaw, dryRun);
+}
+
+function syncBhxCore_(storesRaw, dryRun) {
   if (!Array.isArray(storesRaw) || !storesRaw.length) throw new Error('Snapshot BHX rỗng');
   const stores = storesRaw.map(function (s) {
     const id = Number(s.store_id), lat = Number(s.lat), lng = Number(s.lng);
@@ -387,6 +392,120 @@ function syncBhx_(secret, storesRaw, dryRun) {
     putSetting_('bhx_last_run', Utilities.formatDate(new Date(), CFG.TZ, 'yyyy-MM-dd HH:mm'));
     return res;
   });
+}
+
+// ───────────────────────── Tự lấy BHX trên máy chủ Google (lịch 06:00) ─────────────────────────
+// Cùng quy tắc với bhx_fetch.py: 27 tỉnh từ GetFull, phân trang 50/trang, alias storeId/lat/lng,
+// bỏ cửa hàng ảo, khử trùng theo storeId. Thiếu > 2% so với tổng API báo → dừng, không ghi.
+const BHX = {
+  PROVINCES: 'https://api.bachhoaxanh.com/gw/LocationV3/GetFull',
+  STORES: 'https://api.bachhoaxanh.com/gw/Location/V2/GetStoresByLocation',
+  PAGE: 50,             // trần thật của server
+  BATCH: 25,            // số request song song mỗi lô
+  MIN_COMPLETE: 0.98,
+  HEADERS: { Accept: 'application/json, text/plain, */*', Origin: 'https://www.bachhoaxanh.com', Referer: 'https://www.bachhoaxanh.com/' },
+  KEYS: { store_id: ['storeId', 'storeID', 'id'], lat: ['lat', 'latitude'], lng: ['lng', 'lon', 'long', 'longitude'] },
+};
+
+// fetchAll theo lô; request lỗi (mạng, HTTP ≠ 200, không phải JSON) được thử lại tối đa 2 lần.
+function bhxFetchJson_(urls) {
+  const out = new Array(urls.length);
+  let todo = urls.map(function (_, i) { return i; });
+  for (let attempt = 0; attempt < 3 && todo.length; attempt++) {
+    if (attempt) Utilities.sleep(2000 * attempt);
+    const failed = [];
+    for (let s = 0; s < todo.length; s += BHX.BATCH) {
+      const idx = todo.slice(s, s + BHX.BATCH);
+      let res;
+      try {
+        res = UrlFetchApp.fetchAll(idx.map(function (i) { return { url: urls[i], muteHttpExceptions: true, headers: BHX.HEADERS }; }));
+      } catch (e) { Array.prototype.push.apply(failed, idx); continue; }
+      res.forEach(function (r, k) {
+        if (r.getResponseCode() === 200) {
+          try { out[idx[k]] = JSON.parse(r.getContentText()); return; } catch (_) { /* rơi xuống failed */ }
+        }
+        failed.push(idx[k]);
+      });
+    }
+    todo = failed;
+  }
+  if (todo.length) throw new Error('API BHX lỗi ' + todo.length + '/' + urls.length + ' request, vd: ' + urls[todo[0]]);
+  return out;
+}
+
+const pick_ = function (rec, keys) {
+  for (let i = 0; i < keys.length; i++) if (rec[keys[i]] !== undefined && rec[keys[i]] !== null) return rec[keys[i]];
+  return undefined;
+};
+
+// Tìm đệ quy mảng cửa hàng (có storeId/lat/lng) — không phụ thuộc tên wrapper data/stores.
+function findStores_(node) {
+  if (Array.isArray(node)) {
+    if (node.length && node[0] && typeof node[0] === 'object' &&
+        Object.keys(BHX.KEYS).every(function (k) { return pick_(node[0], BHX.KEYS[k]) !== undefined; })) return node;
+    for (let i = 0; i < node.length; i++) { const f = findStores_(node[i]); if (f) return f; }
+  } else if (node && typeof node === 'object') {
+    const ks = Object.keys(node);
+    for (let i = 0; i < ks.length; i++) { const f = findStores_(node[ks[i]]); if (f) return f; }
+  }
+  return null;
+}
+
+function fetchBhxStores_() {
+  const pl = bhxFetchJson_([BHX.PROVINCES])[0];
+  const provinces = (((pl || {}).data || {}).provinces || []).map(function (p) { return { id: Number(p.id), name: String(p.name || ''), total: 0 }; });
+  if (!provinces.length) throw new Error('Không lấy được danh sách tỉnh BHX (GetFull)');
+  const url = function (pid, page) { return BHX.STORES + '?provinceId=' + pid + '&wardId=0&pageSize=' + BHX.PAGE + '&pageIndex=' + page; };
+
+  const first = bhxFetchJson_(provinces.map(function (p) { return url(p.id, 0); }));
+  const more = [], owner = [];
+  provinces.forEach(function (p, i) {
+    p.total = Number(((first[i] || {}).data || {}).total) || 0;
+    for (let pg = 1; pg < Math.ceil(p.total / BHX.PAGE); pg++) { more.push(url(p.id, pg)); owner.push(i); }
+  });
+  const rest = bhxFetchJson_(more);
+
+  const all = {}, keep = {};
+  const add = function (payload, p) {
+    (findStores_(payload) || []).forEach(function (rec) {
+      const id = Number(pick_(rec, BHX.KEYS.store_id)), lat = Number(pick_(rec, BHX.KEYS.lat)), lng = Number(pick_(rec, BHX.KEYS.lng));
+      if (!isFinite(id) || !isFinite(lat) || !isFinite(lng)) return;
+      all[id] = 1;
+      if (isTrue_(rec.isStoreVirtual) || String(rec.isStoreVirtual) === '1') return;    // bỏ cửa hàng ảo
+      keep[id] = { store_id: id, dia_chi: String(rec.storeAddress || ''), province_id: p.id, tinh: p.name,
+        lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 };
+    });
+  };
+  provinces.forEach(function (p, i) { add(first[i], p); });
+  rest.forEach(function (payload, k) { add(payload, provinces[owner[k]]); });
+
+  const totalApi = provinces.reduce(function (a, p) { return a + p.total; }, 0), got = Object.keys(all).length;
+  if (!totalApi || got < totalApi * BHX.MIN_COMPLETE) {
+    throw new Error('Lấy thiếu: ' + got + '/' + totalApi + ' cửa hàng — không ghi để tránh báo đóng cửa sai');
+  }
+  return { stores: Object.keys(keep).map(function (k) { return keep[k]; }), got: got, totalApi: totalApi,
+    provinces: provinces.length, requests: 1 + provinces.length + more.length };
+}
+
+// Lịch chạy hằng ngày (setup tạo, 06:00 theo múi giờ của project). Chạy tay được để thử.
+function syncBhxDaily() {
+  const t0 = Date.now();
+  try {
+    const f = fetchBhxStores_();
+    const t1 = Date.now();
+    const res = syncBhxCore_(f.stores, false);
+    const msg = 'OK ' + f.stores.length + ' cửa hàng (API ' + f.got + '/' + f.totalApi + ', ' + f.provinces + ' tỉnh, ' + f.requests + ' request) · mở ' +
+      res.open + ' · đóng ' + res.close + ' · dời ' + res.move + (res.baseline ? ' · baseline' : '') +
+      ' · lấy ' + Math.round((t1 - t0) / 1000) + 's, ghi ' + Math.round((Date.now() - t1) / 1000) + 's';
+    withLock_(function () { putSetting_('bhx_last_status', msg); });
+    Logger.log(msg);
+    return res;
+  } catch (e) {
+    const msg = 'LỖI ' + Utilities.formatDate(new Date(), CFG.TZ, 'yyyy-MM-dd HH:mm') + ': ' + e.message;
+    try { withLock_(function () { putSetting_('bhx_last_status', msg); }); } catch (_) { /* không che lỗi gốc */ }
+    Logger.log(msg);
+    throw e;            // để Apps Script gửi mail báo lỗi trigger cho chủ project
+  }
 }
 
 // ───────────────────────── Phân quyền / nhật ký ─────────────────────────
@@ -434,8 +553,11 @@ function setup() {
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('SYNC_SECRET')) props.setProperty('SYNC_SECRET', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, ''));
 
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'purgeExpiredWm') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (['purgeExpiredWm', 'syncBhxDaily'].indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t);
+  });
   ScriptApp.newTrigger('purgeExpiredWm').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('syncBhxDaily').timeBased().atHour(6).everyDays(1).create();
   uploadFolder_();
   Logger.log('Xong. Admin đầu tiên: %s', owner);
   Logger.log('SYNC_SECRET (dán vào GitHub Secret, KHÔNG chia sẻ): %s', props.getProperty('SYNC_SECRET'));
