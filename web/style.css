@@ -1,6 +1,6 @@
 :root {
   --bg: #f5f6f8; --surface: #ffffff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
-  --accent: #1f6feb; --wm-hit: #d9480f; --wm-free: #2f9e44; --bhx: #1c7ed6; --warn-bg: #fff4e5; --warn: #8a4b00;
+  --accent: #1f6feb; --wm-hit: #d9480f; --wm-free: #2f9e44; --bhx: #1c7ed6; --bhx-all: #8a94a6; --warn-bg: #fff4e5; --warn: #8a4b00;
   --open: #2f9e44; --close: #c92a2a; --move: #e67700;
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif; font-size: 14px;
 }
@@ -52,6 +52,7 @@ main { padding: 16px; display: flex; flex-direction: column; gap: 14px; max-widt
 .legend { display: flex; gap: 14px; padding: 8px 12px; color: var(--muted); flex-wrap: wrap; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
 .dot.wm-hit { background: var(--wm-hit); } .dot.wm-free { background: var(--wm-free); } .dot.bhx { background: var(--bhx); width: 7px; height: 7px; }
+.dot.bhx-all { background: var(--bhx-all); width: 5px; height: 5px; }
 
 .bar-row { display: grid; grid-template-columns: 110px 1fr 52px; gap: 8px; align-items: center; margin-bottom: 7px; font-size: 12px; cursor: pointer; }
 .bar-row:hover .bar-name { color: var(--accent); }

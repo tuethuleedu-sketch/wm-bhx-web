@@ -36,13 +36,20 @@
   const scopeIdx = () => S.wm.map((_, i) => i).filter((i) => !S.tinh || S.wm[i].tinh === S.tinh);
 
   // ---------- Bản đồ ----------
-  let map, wmMarkers = [], bhxLayer, ringLayer;
+  let map, wmMarkers = [], bhxLayer, ringLayer, bhxAllLayer;
   function initMap() {
     map = L.map("map", { preferCanvas: true }).setView([20.8, 106.2], 9);
     // OSM chặn tile (403) nếu thiếu Referer; trang đặt no-referrer → riêng tile gửi origin (chỉ tên miền, không đường dẫn).
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       { maxZoom: 18, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
     bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map);
+  }
+  // Lớp nền: toàn bộ BHX đang mở (chấm xám nhỏ) — luôn hiện, kể cả khi chưa có WM+.
+  function buildBhxAll() {
+    if (bhxAllLayer) bhxAllLayer.remove();
+    bhxAllLayer = L.layerGroup(S.bhx.map((b) => L.circleMarker([b.lat, b.lng],
+      { radius: 2.5, weight: 0, fillColor: getVar("--bhx-all"), fillOpacity: 0.7 })
+      .bindTooltip(`<b>BHX ${esc(b.ma)}</b><br>${esc(b.dia_chi)}`))).addTo(map);   // thêm trước WM+ → nằm dưới
   }
   function buildWmMarkers() {                         // gọi lại mỗi khi danh sách WM+ đổi (upload)
     wmMarkers.forEach((mk) => mk.remove());
@@ -211,8 +218,9 @@
     computeAll();
     const ts = [...new Set(S.wm.map((w) => w.tinh))].sort();
     $("#tinh").innerHTML = `<option value="">Tất cả</option>` + ts.map((t) => `<option>${esc(t)}</option>`).join("");
-    buildWmMarkers(); renderOverview();
-    if (S.wm.length) map.fitBounds(L.latLngBounds(S.wm.map((w) => [w.lat, w.lng])), { padding: [20, 20] });
+    buildBhxAll(); buildWmMarkers(); renderOverview();
+    const pts = (S.wm.length ? S.wm : S.bhx).map((w) => [w.lat, w.lng]);   // chưa có WM+ → nhìn toàn bộ BHX
+    if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [20, 20] });
     else $("#snap-info").textContent = "Chưa có dữ liệu WM+ (chưa upload hoặc đã tự xoá sau 48 giờ) — Admin vào tab WM+ (upload) để tải file lên.";
     loadChanges();
   }
