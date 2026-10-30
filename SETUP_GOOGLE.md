@@ -10,7 +10,9 @@ Trình duyệt ──► GitHub Pages (web/: giao diện, KHÔNG chứa dữ li�
                      ├─ kiểm tra phiên đăng nhập OTP + quyền ở MỖI yêu cầu
                      ├─ Google Sheet "WM_BHX_DB": users · settings · wm_versions · bhx_stores · bhx_changes · access_log
                      └─ WM+ mỗi lần upload = 1 file Sheet riêng → XOÁ VĨNH VIỄN sau 48 giờ
-GitHub Action 06:00 ──► API BHX ──► Apps Script (kèm SYNC_SECRET) ──► tab bhx_stores / bhx_changes
+Apps Script syncBhxDaily 06:00 ──► API BHX ──► tab bhx_stores / bhx_changes   (chạy trên máy chủ Google)
+Dự phòng: bhx_sync.py (máy bạn / GitHub Action chạy tay) ──► Apps Script (kèm SYNC_SECRET)
+Lưu ý: API BHX chặn máy chủ GitHub (đã thử 30/10/2026) nhưng cho máy chủ Google gọi.
 ```
 
 ---
@@ -73,7 +75,9 @@ Mở Web app URL trên trình duyệt → phải thấy `{"ok":true,"service":"w
    - `GAS_URL` = Web app URL (bước 1.5)
    - `SYNC_SECRET` = chuỗi 64 ký tự (bước 1.4)
 6. Tab **Actions → BHX daily sync → Run workflow** → chờ 2–5 phút → mở log, dòng cuối phải là `Kết quả: … cửa hàng · … lần đầu: ghi baseline`.
-   Từ lần sau, Action tự chạy **06:00 mỗi ngày**. Tab `bhx_stores` trong Sheet có khoảng 4.300 dòng.
+   Tab `bhx_stores` trong Sheet có khoảng 4.300 dòng.
+   **Thực tế 30/10/2026: bước này lỗi vì API BHX chặn máy chủ GitHub.** Việc lấy BHX hằng ngày do hàm `syncBhxDaily`
+   trong Apps Script đảm nhận (lịch 06:00 do `setup()` tạo). Workflow GitHub chỉ còn nút chạy tay để dự phòng.
    - Lỗi mạng/403 ở bước fetch → API BHX có thể chặn máy chủ GitHub (ở nước ngoài) → dùng **cách dự phòng** bên dưới.
 
 > **Cập nhật code web sau này:** sửa → `python make_release.py` → upload lại nội dung `release\` (ghi đè) → Pages tự triển khai lại.
