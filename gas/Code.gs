@@ -352,7 +352,10 @@ function syncBhx_(secret, storesRaw, dryRun) {
   return syncBhxCore_(storesRaw, dryRun);
 }
 
-function syncBhxCore_(storesRaw, dryRun) {
+// keepProvinces: tỉnh mà API trả ÍT hơn tổng số chính nó báo (trang cuối rỗng — gặp thật 30/10/2026).
+// Cửa hàng thuộc các tỉnh này mà vắng mặt thì GIỮ NGUYÊN, không tính là đóng cửa.
+function syncBhxCore_(storesRaw, dryRun, keepProvinces) {
+  const keep = {}; (keepProvinces || []).forEach(function (p) { keep[String(p)] = 1; });
   if (!Array.isArray(storesRaw) || !storesRaw.length) throw new Error('Snapshot BHX rỗng');
   const stores = storesRaw.map(function (s) {
     const id = Number(s.store_id), lat = Number(s.lat), lng = Number(s.lng);
@@ -369,11 +372,14 @@ function syncBhxCore_(storesRaw, dryRun) {
       else if (km_(Number(p.lat), Number(p.lng), n.lat, n.lng) > CFG.MOVE_KM) move.push({ n: n, p: p });
     });
     const active = old.filter(function (r) { return isTrue_(r.is_active); });
-    const close = active.filter(function (r) { return !seen[String(r.store_id)]; });
+    const missing = active.filter(function (r) { return !seen[String(r.store_id)]; });
+    const held = missing.filter(function (r) { return keep[String(r.province_id)]; });   // vắng do API trả thiếu
+    const close = missing.filter(function (r) { return !keep[String(r.province_id)]; });
     if (active.length && close.length / active.length > CFG.MAX_CLOSE_RATIO) {
       throw new Error('Guard: ' + close.length + ' / ' + active.length + ' cửa hàng đang mở bị coi là đóng (> 30%) — nghi API trả thiếu, không ghi');
     }
-    const res = { baseline: base, stores: stores.length, open: base ? 0 : open.length, close: base ? 0 : close.length, move: base ? 0 : move.length };
+    const heldIds = {}; held.forEach(function (r) { heldIds[String(r.store_id)] = 1; });
+    const res = { baseline: base, stores: stores.length, open: base ? 0 : open.length, close: base ? 0 : close.length, move: base ? 0 : move.length, held: held.length };
     if (dryRun) { res.dry_run = true; return res; }
 
     if (!base) {
@@ -387,7 +393,9 @@ function syncBhxCore_(storesRaw, dryRun) {
     const rows = stores.map(function (n) {
       const p = o[String(n.store_id)];
       return Object.assign({}, n, { tinh: n.tinh || (p ? p.tinh : ''), first_seen: p ? p.first_seen : today, last_seen: today, is_active: true });
-    }).concat(old.filter(function (r) { return !seen[String(r.store_id)]; }).map(function (r) { return Object.assign({}, r, { is_active: false }); }));
+    }).concat(old.filter(function (r) { return !seen[String(r.store_id)]; }).map(function (r) {
+      return heldIds[String(r.store_id)] ? r : Object.assign({}, r, { is_active: false });   // giữ nguyên bản cũ
+    }));
     writeAll_('bhx_stores', rows);
     putSetting_('bhx_last_run', Utilities.formatDate(new Date(), CFG.TZ, 'yyyy-MM-dd HH:mm'));
     return res;
@@ -465,11 +473,12 @@ function fetchBhxStores_() {
   });
   const rest = bhxFetchJson_(more);
 
-  const all = {}, keep = {};
+  const all = {}, keep = {}, perProv = {};
   const add = function (payload, p) {
     (findStores_(payload) || []).forEach(function (rec) {
       const id = Number(pick_(rec, BHX.KEYS.store_id)), lat = Number(pick_(rec, BHX.KEYS.lat)), lng = Number(pick_(rec, BHX.KEYS.lng));
       if (!isFinite(id) || !isFinite(lat) || !isFinite(lng)) return;
+      if (!all[id]) perProv[p.id] = (perProv[p.id] || 0) + 1;
       all[id] = 1;
       if (isTrue_(rec.isStoreVirtual) || String(rec.isStoreVirtual) === '1') return;    // bỏ cửa hàng ảo
       keep[id] = { store_id: id, dia_chi: String(rec.storeAddress || ''), province_id: p.id, tinh: p.name,
@@ -483,7 +492,9 @@ function fetchBhxStores_() {
   if (!totalApi || got < totalApi * BHX.MIN_COMPLETE) {
     throw new Error('Lấy thiếu: ' + got + '/' + totalApi + ' cửa hàng — không ghi để tránh báo đóng cửa sai');
   }
-  return { stores: Object.keys(keep).map(function (k) { return keep[k]; }), got: got, totalApi: totalApi,
+  const short = provinces.filter(function (p) { return (perProv[p.id] || 0) < p.total; })
+    .map(function (p) { return { id: p.id, got: perProv[p.id] || 0, total: p.total }; });
+  return { stores: Object.keys(keep).map(function (k) { return keep[k]; }), got: got, totalApi: totalApi, short: short,
     provinces: provinces.length, requests: 1 + provinces.length + more.length };
 }
 
@@ -493,9 +504,11 @@ function syncBhxDaily() {
   try {
     const f = fetchBhxStores_();
     const t1 = Date.now();
-    const res = syncBhxCore_(f.stores, false);
+    const res = syncBhxCore_(f.stores, false, f.short.map(function (s) { return s.id; }));
     const msg = 'OK ' + f.stores.length + ' cửa hàng (API ' + f.got + '/' + f.totalApi + ', ' + f.provinces + ' tỉnh, ' + f.requests + ' request) · mở ' +
       res.open + ' · đóng ' + res.close + ' · dời ' + res.move + (res.baseline ? ' · baseline' : '') +
+      (f.short.length ? ' · API trả thiếu ở tỉnh ' + f.short.map(function (s) { return s.id + ' (' + s.got + '/' + s.total + ')'; }).join(', ') +
+        ' → giữ nguyên ' + res.held + ' cửa hàng vắng mặt' : '') +
       ' · lấy ' + Math.round((t1 - t0) / 1000) + 's, ghi ' + Math.round((Date.now() - t1) / 1000) + 's';
     withLock_(function () { putSetting_('bhx_last_status', msg); });
     Logger.log(msg);
@@ -560,5 +573,22 @@ function setup() {
   ScriptApp.newTrigger('syncBhxDaily').timeBased().atHour(6).everyDays(1).create();
   uploadFolder_();
   Logger.log('Xong. Admin đầu tiên: %s', owner);
-  Logger.log('SYNC_SECRET (dán vào GitHub Secret, KHÔNG chia sẻ): %s', props.getProperty('SYNC_SECRET'));
+  // Không in khoá ra log (log có thể bị chụp màn hình). Xem trong Cài đặt dự án → Thuộc tính tập lệnh.
+  Logger.log('SYNC_SECRET đã có (64 ký tự) — xem trong ⚙️ Cài đặt dự án → Thuộc tính tập lệnh, KHÔNG chia sẻ');
+}
+
+// Sửa tay (chỉ chạy khi cần): huỷ các bản ghi "đóng cửa" của 1 ngày đã xác nhận là báo sai —
+// xoá các dòng type=close ngày đó trong bhx_changes và bật lại is_active cho cửa hàng tương ứng.
+function undoBhxCloses(dateStr) {
+  const day = dateStr || todayVN_();
+  return withLock_(function () {
+    const ch = readRows_('bhx_changes');
+    const ids = {}; ch.forEach(function (r) { if (String(r.detected_on) === day && r.type === 'close') ids[String(r.store_id)] = 1; });
+    const n = Object.keys(ids).length;
+    if (!n) { Logger.log('Không có bản ghi đóng cửa ngày %s', day); return 0; }
+    writeAll_('bhx_changes', ch.filter(function (r) { return !(String(r.detected_on) === day && r.type === 'close'); }));
+    writeAll_('bhx_stores', readRows_('bhx_stores').map(function (r) { return ids[String(r.store_id)] ? Object.assign({}, r, { is_active: true }) : r; }));
+    Logger.log('Đã huỷ %s bản ghi đóng cửa ngày %s: %s', n, day, Object.keys(ids).join(', '));
+    return n;
+  });
 }
