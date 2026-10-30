@@ -176,11 +176,29 @@
   check("lỗi được ghi vào bhx_last_status", /^LỖI /.test(settings_().bhx_last_status));
   flaky = {};
   const before2 = JSON.stringify(sheetRows("bhx_stores"));
+  const lastGood = M.fetchHandler;
   M.fetchHandler = ((orig) => (url) => {                                         // API báo total 120 nhưng trang 2 rỗng → thiếu 20/150
     const x = orig(url); if (url.includes("provinceId=1000") && url.endsWith("pageIndex=2")) x.body.data.stores = []; return x;
   })(M.fetchHandler);
   err = null; try { syncBhxDaily(); } catch (e) { err = e.message; }
   check("lấy thiếu > 2% so với tổng API → dừng, không ghi", /Lấy thiếu: 130\/150/.test(err || "") && JSON.stringify(sheetRows("bhx_stores")) === before2, err);
+  // API báo total 120 cho tỉnh 1000 nhưng trang cuối rỗng (thiếu 20 < 2% tổng? không — dùng thiếu 1 cửa hàng)
+  M.fetchHandler = ((orig) => (url) => {
+    const x = orig(url);
+    if (url.includes("provinceId=1000") && url.endsWith("pageIndex=2")) x.body.data.stores = x.body.data.stores.slice(0, 19);   // 120 báo, 119 trả
+    return x;
+  })(lastGood);
+  r = syncBhxDaily();
+  const act = (id) => sheetRows("bhx_stores").find((row) => String(row[0]) === String(id));
+  check("tỉnh API trả thiếu (119/120): KHÔNG báo đóng cửa sai, giữ nguyên cửa hàng vắng mặt",
+    r.close === 0 && r.held === 1 && /API trả thiếu ở tỉnh 1000 \(119\/120\)/.test(settings_().bhx_last_status) && act(5119)[8] === true, [r, settings_().bhx_last_status]);
+  // undoBhxCloses: tạo 1 bản ghi đóng thật rồi huỷ
+  M.fetchHandler = lastGood; API[1001] = API[1001].slice(1);
+  r = syncBhxDaily();
+  check("tỉnh trả đủ vẫn phát hiện đóng cửa thật", r.close === 1 && r.held === 0, r);
+  const nClose = sheetRows("bhx_changes").filter((x) => x[1] === "close").length;
+  check("undoBhxCloses huỷ bản ghi đóng của ngày, bật lại cửa hàng", undoBhxCloses() >= 1 && sheetRows("bhx_changes").filter((x) => x[1] === "close").length < nClose);
+  check("setup không in SYNC_SECRET ra log", !M.logs.some((l) => l.includes(SECRET)));
   check("findStores_ chịu được wrapper khác tên", findStores_({ result: { items: [{ id: 1, latitude: 21, longitude: 105 }] } }).length === 1);
 
   // ---- Thu hồi quyền, nhật ký, đăng xuất ----
