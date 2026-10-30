@@ -49,7 +49,11 @@
   check("đăng nhập đúng mã → có token + role admin", admin && admin.token && admin.token.length === 64 && admin.role === "admin");
   r = call("verifyOtp", { email: OWNER, code: lastOtp(OWNER) });
   check("mã OTP chỉ dùng được 1 lần", !!r.error);
-  check("token chỉ lưu dạng băm trong cache", ![...M.cache.keys()].some((k) => k.includes(admin.token)));
+  check("token chỉ lưu dạng băm (không nằm trong cache/properties)",
+    ![...M.cache.keys(), ...M.props.keys(), ...M.props.values()].some((k) => k.includes(admin.token)));
+  const sessKeys = () => [...M.props.keys()].filter((k) => k.startsWith("sess:"));
+  check("phiên lưu ở Script Properties, hạn ~30 ngày", sessKeys().length === 1
+    && Math.abs(JSON.parse(M.props.get(sessKeys()[0])).x - Date.now() - 30 * 864e5) < 60e3);
 
   // ---- Phiên + quyền ----
   r = call("snapshot");
@@ -212,8 +216,22 @@
   const ev = r.data.map((x) => x.event + ":" + x.email);
   check("nhật ký có login + denied", ev.includes("login:" + OWNER) && ev.includes("denied:la@gmail.com"), ev);
   check("nhật ký mới nhất ở trên", r.data[0].at >= r.data[r.data.length - 1].at);
+  check("viewer bị thu hồi → phiên bị xoá khỏi Properties", !M.props.has("sess:" + sha_(viewer.token)));
+  // phiên 30 ngày: gia hạn khi còn dùng, hết hạn thì bị từ chối + dọn
+  const k0 = "sess:" + sha_(admin.token), s0 = JSON.parse(M.props.get(k0));
+  M.props.set(k0, JSON.stringify({ ...s0, x: Date.now() + 5 * 864e5 }));          // giả: còn 5 ngày
+  call("snapshot", { token: admin.token });
+  check("dùng web khi phiên còn ít ngày → tự gia hạn lại 30 ngày", JSON.parse(M.props.get(k0)).x - Date.now() > 29 * 864e5);
+  const tmp = login(OWNER), k1 = "sess:" + sha_(tmp.token);
+  M.props.set(k1, JSON.stringify({ e: OWNER, x: Date.now() - 1000 }));              // giả: đã quá hạn
+  check("phiên quá hạn → lỗi AUTH", call("snapshot", { token: tmp.token }).code === "AUTH");
+  check("phiên quá hạn → bị xoá khi dùng", !M.props.has(k1));
+  M.props.set("sess:cu", JSON.stringify({ e: OWNER, x: Date.now() - 1000 }));
+  purgeExpiredWm();
+  check("lịch hằng giờ dọn phiên hết hạn, giữ phiên còn hạn", !M.props.has("sess:cu") && M.props.has(k0));
   call("logout", { token: admin.token });
   check("đăng xuất → token hết hiệu lực", call("snapshot", { token: admin.token }).code === "AUTH");
+  check("đăng xuất → phiên bị xoá khỏi Properties", !M.props.has(k0));
   check("doGet không trả dữ liệu", JSON.parse(doGet().getContent()).service === "wm-bhx");
 
   out.innerHTML += `\nKẾT QUẢ: ${fail ? fail + " lỗi" : "TẤT CẢ ĐẠT"} (${pass}/${pass + fail})`;

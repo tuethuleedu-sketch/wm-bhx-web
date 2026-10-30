@@ -73,7 +73,8 @@
       remove: (k) => M.cache.delete(k),
     }),
   };
-  G.PropertiesService = { getScriptProperties: () => ({ getProperty: (k) => (M.props.has(k) ? M.props.get(k) : null), setProperty: (k, v) => M.props.set(k, String(v)) }) };
+  G.PropertiesService = { getScriptProperties: () => ({ getProperty: (k) => (M.props.has(k) ? M.props.get(k) : null), setProperty: (k, v) => M.props.set(k, String(v)),
+    deleteProperty: (k) => M.props.delete(k), getProperties: () => Object.fromEntries(M.props) }) };
 
   // Băm giả (KHÔNG phải SHA-256 thật) — đủ để test logic so khớp; trả mảng 32 byte có dấu như Apps Script
   function fakeDigest(s) {
