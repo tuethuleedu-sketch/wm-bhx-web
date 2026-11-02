@@ -22,11 +22,12 @@
 
   // ---- setup ----
   setup(); setup();
-  check("setup tạo đủ 6 tab", ["users", "settings", "wm_versions", "bhx_stores", "bhx_changes", "access_log"].every((n) => SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n)));
+  check("setup tạo đủ 8 tab", ["users", "settings", "wm_versions", "bhx_stores", "bhx_changes", "comp_stores", "comp_changes", "access_log"].every((n) => SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n)));
   check("setup 2 lần: vẫn 1 Admin (chủ Sheet, viết thường)", sheetRows("users").length === 1 && sheetRows("users")[0][0] === OWNER && sheetRows("users")[0][1] === "admin");
-  check("setup 2 lần: đúng 2 lịch (purge hằng giờ + BHX 06:00), không trùng",
-    M.triggers.length === 2 && M.triggers.some((t) => t.getHandlerFunction() === "purgeExpiredWm" && t.spec.everyHours === 1)
-    && M.triggers.some((t) => t.getHandlerFunction() === "syncBhxDaily" && t.spec.atHour === 6 && t.spec.everyDays === 1));
+  check("setup 2 lần: đúng 3 lịch (purge hằng giờ + BHX 06:00 + chuỗi khác 07:00), không trùng",
+    M.triggers.length === 3 && M.triggers.some((t) => t.getHandlerFunction() === "purgeExpiredWm" && t.spec.everyHours === 1)
+    && M.triggers.some((t) => t.getHandlerFunction() === "syncBhxDaily" && t.spec.atHour === 6 && t.spec.everyDays === 1)
+    && M.triggers.some((t) => t.getHandlerFunction() === "syncCompDaily" && t.spec.atHour === 7 && t.spec.everyDays === 1));
   const SECRET = M.props.get("SYNC_SECRET");
   check("setup tạo SYNC_SECRET 64 ký tự", SECRET && SECRET.length === 64);
 
@@ -102,6 +103,9 @@
   r = call("snapshot", { token: viewer.token });
   check("viewer thấy WM+ bản mới nhất (S1, S3) + hạn xoá", r.ok && r.data.wm.map((w) => w.ma).sort().join() === "S1,S3" && !!r.data.wmExpires);
   check("thiếu tên → dùng mã làm tên", r.data.wm.find((w) => w.ma === "S3").ten === "S3");
+  check("thiếu chuỗi → mặc định WM+", r.data.wm.every((w) => w.chuoi === "WM+" && w.khu_vuc === ""));
+  r = call("publishWm", { token: admin.token, rows: [{ ma: "X", lat: 20.8, lng: 106.2, chuoi: "BHX" }] });
+  check("chuỗi lạ → lỗi", /chuỗi/.test(r.error));
 
   // ---- Hết hạn 48 giờ ----
   const vs = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("wm_versions");
@@ -121,6 +125,9 @@
   check("Drive API chưa bật → chuyển vào thùng rác + ghi chú cảnh báo", M.trashed.includes(v1file) && /thùng rác/.test(vs.data[1][11]));
   purgeExpiredWm();
   check("chạy job lần nữa: không xoá lại bản đã xoá", M.removed.length === 1);
+  r = call("publishWm", { token: admin.token, rows: W2.concat([{ ma: "T1", tinh: "T", lat: 20.7, lng: 106.1, chuoi: "WMT", khu_vuc: "Rural", dia_chi: "12 Lê Lợi" }]) });
+  const t1 = call("snapshot", { token: admin.token }).data.wm.find((w) => w.ma === "T1");
+  check("lưu & đọc lại Chuỗi/Khu vực/Địa chỉ", r.ok && t1 && t1.chuoi === "WMT" && t1.khu_vuc === "Rural" && t1.dia_chi === "12 Lê Lợi", t1);
 
   // ---- Đồng bộ BHX ----
   const snap = (...s) => s.map(([id, lat, lng]) => ({ store_id: id, dia_chi: "BHX " + id, province_id: 1000, tinh: "Hà Nội", lat, lng }));
@@ -204,6 +211,64 @@
   check("undoBhxCloses huỷ bản ghi đóng của ngày, bật lại cửa hàng", undoBhxCloses() >= 1 && sheetRows("bhx_changes").filter((x) => x[1] === "close").length < nClose);
   check("setup không in SYNC_SECRET ra log", !M.logs.some((l) => l.includes(SECRET)));
   check("findStores_ chịu được wrapper khác tên", findStores_({ result: { items: [{ id: 1, latitude: 21, longitude: 105 }] } }).length === 1);
+
+  // ---- Các chuỗi khác (syncCompDaily) với nguồn giả ----
+  const tinhCases = [["Số 1231, khu phố 5, Đường Quốc lộ 1A, Phường An Lạc, Thành phố Hồ Chí Minh, Việt Nam", "Hồ Chí Minh"],
+    ["B.107 chung cư Phú Mỹ - C2, Phường Bình Dương, Thành phố Hồ Chí Minh", "Hồ Chí Minh"], ["51 Nguyễn Văn Cừ, Phường Bắc Giang, Tỉnh Bắc Ninh", "Bắc Ninh"],
+    ["12 Quoc Huong, Thao Dien Ward, Thu Duc City, Ho Chi Minh City", "Hồ Chí Minh"], ["ParkCity Hanoi, Le Trong Tan, La Khe, Ha Dong, Ha Noi", "Hà Nội"],
+    ["Khu Phố Lộc An,Phường Trảng Bàng, TỉnhTây Ninh", "Tây Ninh"], ["1 Đường A, Tỉnh Bình Thuận", "Lâm Đồng"], ["2 Đường B, Tỉnh Bà Rịa – Vũng Tàu", "Hồ Chí Minh"],
+    ["3 Đường C, Tỉnh Khánh Hoà", "Khánh Hòa"], ["Số 4, Phường Sơn Lâm, Tỉnh Gia Lai", "Gia Lai"], ["Không rõ nơi nào", ""]];
+  check("tinhOf_ lấy đúng tỉnh từ địa chỉ", tinhCases.every(([a, t]) => tinhOf_(a) === t), tinhCases.filter(([a, t]) => tinhOf_(a) !== t).map(([a]) => [a, tinhOf_(a)]));
+  r = call("snapshot", { token: admin.token });
+  check("chưa kéo chuỗi khác: snapshot.comp rỗng, không lỗi", r.ok && r.data.comp.length === 0);
+  const COOP_PAGE = '<a href="/he-thong-sieu-thi/co-opmart-a">a</a><a href="/he-thong-sieu-thi/co-opmart-b">b</a>';
+  const coopDetail = (n, lat) => `<title>CO.OPMART ${n}</title><span class="last">Co.op ${n}</span></div><h1>CO.OPMART ${n}</h1><p>241A Chu V&#x103;n An, Ph&#x1B0;&#x1EDD;ng ${n}, Th&#xE0;nh ph&#x1ED1; H&#x1ED3; Ch&#xED; Minh</p><iframe src="https://www.google.com/maps/embed?pb=!2d106.69834!3d${lat}!2m3"></iframe>`;
+  const srcs = {
+    coop: [["co-opmart-a", 10.81], ["co-opmart-b", 10.82]], go: [{ storeID: 21, name: "GO! AN LẠC", address: "Số 1, Phường An Lạc, Thành phố Hồ Chí Minh, Việt Nam", latitude: "10.73", longtitude: "106.60" }],
+    tops: [{ id: 7, title: "Tops Market Hà Đông", address: "Ho Guom Plaza, Ha Dong District, Hanoi", maps_lat: "20.97", maps_lng: "105.78" }],
+    lotte: [{ store_code: "nsg", name: "Nam Sài Gòn", status: "1", store_address: "469 Nguyễn Hữu Thọ, TP.Hồ Chí Minh", latitude: "10.74 ", longitude: "106.70" }, { store_code: "x", name: "Đã đóng", status: "0", store_address: "x", latitude: "10", longitude: "106" }],
+    kfm: [{ storeCode: "A1", address: "1 Lê Lợi, Thành phố Hồ Chí Minh", openingDate: "2020-01-01T00:00:00+07:00", lat: 10.7, lng: 106.7 },
+      { storeCode: "A2", address: "Sắp mở, Thành phố Hồ Chí Minh", openingDate: "2999-01-01T00:00:00+07:00", lat: 10.7, lng: 106.7 }, { storeCode: "A3", address: "Chưa có toạ độ", openingDate: "2020-01-01T00:00:00+07:00", lat: 1, lng: 1 }],
+  };
+  const compHandler = (u) => {
+    if (u.includes("co-opmart.com.vn") && u.includes("page=")) return { code: 200, body: u.endsWith("page=1") ? COOP_PAGE : COOP_PAGE };
+    const c = srcs.coop.find(([s]) => u.endsWith("/" + s));
+    if (c) return { code: 200, body: coopDetail(c[0], c[1]) };
+    if (u.includes("sieuthi-go.vn")) return { code: 200, body: { message: srcs.go } };
+    if (u.includes("topsmarket.vn")) return srcs.tops ? { code: 200, body: { data: srcs.tops } } : { code: 500, body: "x" };
+    if (u.includes("lottemart.vn")) return srcs.lotte ? { code: 200, body: srcs.lotte } : { code: 200, body: "<html>chặn bot</html>" };
+    if (u.includes("kingfoodmart.com")) return { code: 200, body: { data: { partnerStore: { data: srcs.kfm, total: srcs.kfm.length } } } };
+    return { code: 404, body: "" };
+  };
+  M.fetchHandler = compHandler;
+  let st = syncCompDaily();
+  check("kéo lần đầu: 4 nguồn OK, baseline", ["COOP", "GO", "KFM", "LOTTE"].every((c) => st[c].ok && /baseline/.test(st[c].msg)), st);
+  const compOf = (c) => call("snapshot", { token: admin.token }).data.comp.filter((x) => x.chain === c);
+  check("Co.opmart: giải mã địa chỉ, toạ độ từ bản đồ nhúng, tỉnh đúng", compOf("COOP").length === 2 && compOf("COOP")[0].dia_chi.startsWith("241A Chu Văn An") && compOf("COOP")[0].lat === 10.81 && compOf("COOP")[0].tinh === "Hồ Chí Minh", compOf("COOP"));
+  check("GO + Tops chung 1 chuỗi, tỉnh theo địa chỉ", compOf("GO").map((x) => x.ma + ":" + x.tinh).join() === "21:Hồ Chí Minh,tops-7:Hà Nội", compOf("GO"));
+  check("LOTTE: bỏ cửa hàng status≠1, toạ độ có khoảng trắng vẫn đọc được", compOf("LOTTE").length === 1 && compOf("LOTTE")[0].lat === 10.74);
+  check("Kingfood: bỏ cửa hàng chưa khai trương và chưa có toạ độ", compOf("KFM").map((x) => x.ma).join() === "A1");
+  check("baseline không tạo sự kiện thay đổi", sheetRows("comp_changes").length === 0);
+  srcs.go.push({ storeID: 22, name: "GO! MỚI", address: "Tỉnh Nghệ An", latitude: "18.67", longtitude: "105.69" });
+  srcs.lotte = null; srcs.tops[0].maps_lat = "20.98";
+  const lotteBefore = compOf("LOTTE").length;
+  st = syncCompDaily();
+  check("nguồn bị chặn (trả HTML): báo lỗi đúng chuỗi, chuỗi khác vẫn chạy", !st.LOTTE.ok && st.GO.ok && st.COOP.ok && st.KFM.ok, st);
+  check("nguồn lỗi: giữ nguyên dữ liệu cũ, không báo đóng cửa", compOf("LOTTE").length === lotteBefore && !sheetRows("comp_changes").some((x) => x[1] === "LOTTE"));
+  r = call("changes", { token: admin.token });
+  check("phát hiện GO mở mới + Tops dời, hiện trong tab Thay đổi cùng BHX", r.data.some((e) => e.chain === "GO" && e.type === "open" && e.ma === "22") && r.data.some((e) => e.chain === "GO" && e.type === "move" && e.ma === "tops-7") && r.data.some((e) => e.chain === "BHX"), r.data.filter((e) => e.chain !== "BHX"));
+  const savedTops = srcs.tops; srcs.tops = null;
+  st = syncCompDaily();
+  check("thiếu 1 trong 2 nguồn GO/Tops: lỗi cả nhóm, không báo đóng cửa sai", !st.GO.ok && compOf("GO").length === 3);
+  srcs.tops = savedTops; srcs.lotte = [{ store_code: "nsg", name: "Nam Sài Gòn", status: "1", store_address: "469 Nguyễn Hữu Thọ, TP.Hồ Chí Minh", latitude: "10.74", longitude: "106.70" }];
+  srcs.go = srcs.go.slice(0, 1); savedTops.length = 0;           // GO: 3 → 1 cửa hàng
+  st = syncCompDaily();
+  check("guard: quá 30% bị coi là đóng → không ghi", !st.GO.ok && /Guard/.test(st.GO.msg) && compOf("GO").length === 3, st.GO);
+  srcs.go = [srcs.go[0], { storeID: 22, name: "GO! MỚI", address: "Tỉnh Nghệ An", latitude: "18.67", longtitude: "105.69" }];
+  savedTops.push({ id: 7, title: "Tops Market Hà Đông", address: "Hanoi", maps_lat: "20.98", maps_lng: "105.78" });
+  const settingsSt = JSON.parse(call("snapshot", { token: admin.token }).data.compStatus);
+  check("trạng thái từng chuỗi được lưu để web hiển thị", settingsSt.GO && settingsSt.GO.ok === false && !!settingsSt.GO.at);
+  M.fetchHandler = lastGood;
 
   // ---- Thu hồi quyền, nhật ký, đăng xuất ----
   r = call("removeUser", { token: admin.token, email: OWNER });
