@@ -7,7 +7,29 @@ window.WMUpload = (function () {
     tinh: ["Tỉnh mới", "Tỉnh/Thành", "Tỉnh/TP", "Tỉnh/TP cũ trước 1/7", "Tỉnh"],
     lat: ["Latitude", "Vĩ độ", "Lat"],
     lng: ["Longitude", "Kinh độ", "Lng", "Long"],
+    // Tuỳ chọn
+    khu_vuc: ["Khu vực", "Khu vuc", "Urban/Rural", "Phân loại khu vực", "Thành thị/Nông thôn", "Area"],
+    chuoi: ["Chuỗi", "Chuoi", "Chain", "Brand", "Mô hình"],
+    dia_chi: ["Địa chỉ", "Địa chỉ CH", "Dia chi", "Address"],
   };
+  const OPTIONAL = new Set(["ten", "khu_vuc", "chuoi", "dia_chi"]);
+  const plain = (s) => norm(s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase();
+  // "Thành thị"/"urban"/"nội thành" → Urban; "Nông thôn"/"rural"/"ngoại thành" → Rural; khác giữ nguyên
+  function khuVuc(v) {
+    const s = plain(v);
+    if (!s) return "";
+    if (/urban|thanh thi|noi thanh|do thi/.test(s)) return "Urban";
+    if (/rural|nong thon|ngoai thanh/.test(s)) return "Rural";
+    return norm(v).slice(0, 30);
+  }
+  // WinMart+ / WM+ / WMP → WM+; WinMart / WMT → WMT; trống → mặc định của lần upload
+  function chuoi(v, dflt) {
+    const s = plain(v).replace(/\s/g, "");
+    if (!s) return dflt;
+    if (/^(wm\+|wmp|winmart\+|winmartplus|wmplus)$/.test(s)) return "WM+";
+    if (/^(wmt|winmart|wm)$/.test(s)) return "WMT";
+    return null;
+  }
   const BBOX = [8.0, 24.5, 102.0, 110.0];
   const MOVE_KM = 0.05;
   const ALL = new Set(Object.values(COLS).flat());
@@ -34,7 +56,7 @@ window.WMUpload = (function () {
     const mapping = {}, missing = [];
     for (const [k, cands] of Object.entries(COLS)) {
       const c = cands.map((n) => header.indexOf(n)).find((ix) => ix >= 0 && body.some((r) => r[ix] !== null && norm(r[ix]) !== ""));
-      if (c === undefined) { if (k !== "ten") missing.push(k); } else mapping[k] = c;
+      if (c === undefined) { if (!OPTIONAL.has(k)) missing.push(k); } else mapping[k] = c;
     }
     return { header, headerRow: best + 1, body, mapping, missing };
   }
@@ -42,15 +64,18 @@ window.WMUpload = (function () {
   const num = (v) => (typeof v === "number" ? v : parseFloat(norm(v).replace(",", ".")));
 
   // Kiểm tra từng dòng. Không tự xoá: dòng lỗi được liệt kê; dòng trùng mã chặn việc áp dụng.
-  function validate(p) {
+  function validate(p, dfltChuoi = "WM+") {
     const ok = [], bad = [], seen = new Map();
+    const col = (r, k) => (p.mapping[k] !== undefined ? norm(r[p.mapping[k]]) : "");
     p.body.forEach((r, i) => {
       const line = p.headerRow + 1 + i;                       // số dòng trong Excel
       const ma = norm(r[p.mapping.ma]);
-      const rec = { line, ma, ten: p.mapping.ten !== undefined ? norm(r[p.mapping.ten]) || ma : ma,
-        tinh: norm(r[p.mapping.tinh]), lat: num(r[p.mapping.lat]), lng: num(r[p.mapping.lng]) };
+      const rec = { line, ma, ten: col(r, "ten") || ma,
+        tinh: norm(r[p.mapping.tinh]), lat: num(r[p.mapping.lat]), lng: num(r[p.mapping.lng]),
+        khu_vuc: khuVuc(col(r, "khu_vuc")), chuoi: chuoi(col(r, "chuoi"), dfltChuoi), dia_chi: col(r, "dia_chi").slice(0, 300) };
       let why = "";
       if (!ma) why = "thiếu mã";
+      else if (!rec.chuoi) why = `chuỗi "${col(r, "chuoi")}" không phải WM+/WMT`;
       else if (!isFinite(rec.lat) || !isFinite(rec.lng)) why = "thiếu/sai toạ độ";
       else if (rec.lat < BBOX[0] || rec.lat > BBOX[1] || rec.lng < BBOX[2] || rec.lng > BBOX[3]) why = "toạ độ ngoài lãnh thổ VN";
       if (why) { bad.push({ ...rec, why }); return; }

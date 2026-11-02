@@ -34,7 +34,7 @@
       <strong class="brand">WM+ ↔ BHX</strong>
       <nav id="tabs">
         <button data-view="overview" class="active">Tổng quan</button>
-        <button data-view="changes">Thay đổi BHX</button>
+        <button data-view="changes">Thay đổi đối thủ</button>
         <button data-view="wm" data-admin>WM+ (upload)</button>
         <button data-view="admin" data-admin>Phân quyền</button>
       </nav>
@@ -45,59 +45,80 @@
     <main>
       <!-- Tổng quan -->
       <div id="view-overview" class="view">
+        <div class="chips-row card">
+          <span class="muted small">Đối thủ hiển thị (bấm để bật/tắt):</span>
+          <div id="chips" class="chips"></div>
+        </div>
         <div class="controls card">
-          <label class="slider">Bán kính <b><span id="r-val">1</span> km</b>
-            <input id="r" type="range" min="0.5" max="5" step="0.5" value="1"></label>
-          <label>Tỉnh <select id="tinh"><option value="">Tất cả</option></select></label>
-          <label>Tìm WM+ <input id="q" placeholder="Mã / tên"></label>
+          <label>Chuỗi WM <select id="chuoi"><option value="">Tất cả</option><option>WM+</option><option>WMT</option></select></label>
+          <label>Khu vực <select id="khu"><option value="">Tất cả</option><option>Urban</option><option>Rural</option><option value="-">Chưa phân loại</option></select></label>
+          <label class="combo">Tỉnh <input id="tinh-q" placeholder="Tất cả — gõ để tìm tỉnh" autocomplete="off">
+            <div class="combo-list" id="tinh-list" hidden></div></label>
+          <label class="slider">Bán kính <span class="r-row"><input id="r" type="range" min="0.5" max="20" step="0.5" value="1">
+            <input id="r-num" type="number" min="0.1" max="30" step="0.1" value="1"> km</span></label>
+          <label class="combo search">Tìm cửa hàng / địa chỉ <input id="q" placeholder="Mã, tên, số nhà, tên đường…" autocomplete="off">
+            <div class="combo-list" id="q-list" hidden></div></label>
           <span class="muted small" id="snap-info"></span>
         </div>
 
-        <div class="kpis">
-          <div class="card kpi"><span>% WM+ có BHX trong R</span><b id="k-cov">–</b><small id="k-cov-sub"></small></div>
-          <div class="card kpi"><span>Số BHX (unique) trong R</span><b id="k-uniq">–</b><small>đếm mỗi BHX 1 lần</small></div>
-          <div class="card kpi"><span>BHX / WM+ bình quân</span><b id="k-avg">–</b><small>tính trùng nếu BHX gần nhiều WM+</small></div>
-          <div class="card kpi"><span>Median BHX gần nhất</span><b id="k-med">–</b><small>không phụ thuộc R</small></div>
+        <div class="kpis six">
+          <div class="card kpi hl-wm"><span>Số cửa hàng WM trong bộ lọc</span><b id="k-nwm">–</b><small id="k-nwm-sub"></small></div>
+          <div class="card kpi hl-bhx"><span>Số <i class="lab">BHX</i> trong bộ lọc</span><b id="k-nbhx">–</b><small id="k-nbhx-sub"></small></div>
+          <div class="card kpi"><span>% WM có <i class="lab">BHX</i> trong R</span><b id="k-cov">–</b><small id="k-cov-sub"></small></div>
+          <div class="card kpi"><span>Số <i class="lab">BHX</i> (unique) trong R</span><b id="k-uniq">–</b><small>mỗi cửa hàng đếm 1 lần</small></div>
+          <div class="card kpi"><span><i class="lab">BHX</i> / WM bình quân</span><b id="k-avg">–</b><small>tính trùng nếu 1 cửa hàng gần nhiều WM</small></div>
+          <div class="card kpi"><span>Median <i class="lab">BHX</i> gần nhất</span><b id="k-med">–</b><small>không phụ thuộc R</small></div>
         </div>
 
-        <div class="grid2">
-          <div class="card map-card">
-            <div id="map"></div>
-            <div class="legend small">
-              <span><i class="dot wm-hit"></i>WM+ có BHX trong R</span>
-              <span><i class="dot wm-free"></i>WM+ chưa có BHX trong R</span>
-              <span><i class="dot bhx"></i>BHX trong R</span>
-              <span><i class="dot bhx-all"></i>BHX khác</span>
-            </div>
-          </div>
-          <div class="card">
-            <h3>% WM+ có BHX trong R, theo tỉnh</h3>
-            <div id="bars"></div>
+        <div class="card map-card" id="map-card">
+          <div id="map"></div>
+          <button class="map-full" id="map-full" title="Phóng to toàn màn hình">⛶ Toàn màn hình</button>
+          <div class="legend small">
+            <span><i class="dot wm-hit"></i>WM có <i class="lab">BHX</i> trong R</span>
+            <span><i class="dot wm-free"></i>WM chưa có <i class="lab">BHX</i> trong R</span>
+            <span><i class="dot ring-wmt"></i>Viền tím = WMT</span>
+            <span>Chấm đậm: đối thủ trong R · chấm nhạt: ngoài R (bấm để xem thông tin); màu theo nút lọc ở trên</span>
           </div>
         </div>
 
-        <div class="grid2">
+        <div class="grid2 even">
           <div class="card">
-            <div class="card-head"><h3>WM+ <span class="muted small" id="wm-count"></span></h3>
+            <div class="card-head"><h3>WM <span class="muted small" id="wm-count"></span></h3>
               <button class="ghost" id="exp-wm">Xuất CSV</button></div>
             <div class="table-wrap"><table id="t-wm"><thead><tr>
-              <th data-k="ma">Mã</th><th data-k="tinh">Tỉnh</th><th data-k="n" class="num">BHX trong R</th><th data-k="near" class="num">Gần nhất (km)</th>
+              <th data-k="ma">Mã</th><th data-k="chuoi">Chuỗi</th><th data-k="khu_vuc">Khu vực</th><th data-k="tinh">Tỉnh</th><th data-k="n" class="num"><i class="lab">BHX</i> trong R</th><th data-k="near" class="num">Gần nhất (km)</th>
             </tr></thead><tbody></tbody></table></div>
           </div>
           <div class="card">
-            <div class="card-head"><h3>Cặp WM+–BHX trong R <span class="muted small" id="pair-count"></span></h3>
-              <button class="ghost" id="exp-pairs">Xuất CSV</button></div>
-            <p class="muted small" id="pair-hint">Bấm 1 WM+ (bảng hoặc bản đồ) để xem BHX quanh cửa hàng đó.</p>
-            <div class="table-wrap"><table id="t-pairs"><thead><tr>
-              <th>Mã WM+</th><th>Mã BHX</th><th>Địa chỉ BHX</th><th class="num">Km</th>
+            <div class="card-head"><h3><i class="lab">BHX</i> trong bộ lọc <span class="muted small" id="bhx-count"></span></h3>
+              <button class="ghost" id="exp-bhx">Xuất CSV toàn bộ</button></div>
+            <p class="muted small">Gồm cả cửa hàng không gần WM nào. Lọc theo nút đối thủ, Tỉnh và ô Tìm.</p>
+            <div class="table-wrap"><table id="t-bhx"><thead><tr>
+              <th>Chuỗi</th><th>Mã</th><th>Địa chỉ</th><th>Tỉnh</th><th class="num">WM trong R</th><th class="num">WM gần nhất (km)</th>
             </tr></thead><tbody></tbody></table></div>
+          </div>
+        </div>
+
+        <div class="grid2 even">
+          <div class="card">
+            <div class="card-head"><h3>Cặp WM–<i class="lab">BHX</i> trong R <span class="muted small" id="pair-count"></span></h3>
+              <button class="ghost" id="exp-pairs">Xuất CSV</button></div>
+            <p class="muted small" id="pair-hint">Bấm 1 WM (bảng hoặc bản đồ) để xem đối thủ quanh cửa hàng đó.</p>
+            <div class="table-wrap"><table id="t-pairs"><thead><tr>
+              <th>Mã WM</th><th>Chuỗi</th><th>Mã</th><th>Địa chỉ</th><th class="num">Km</th>
+            </tr></thead><tbody></tbody></table></div>
+          </div>
+          <div class="card">
+            <h3>% WM có <i class="lab">BHX</i> trong R, theo tỉnh</h3>
+            <div id="bars"></div>
           </div>
         </div>
       </div>
 
-      <!-- Thay đổi BHX -->
+      <!-- Thay đổi đối thủ -->
       <div id="view-changes" class="view" hidden>
         <div class="controls card">
+          <label>Đối thủ <select id="c-chain"><option value="">Tất cả</option></select></label>
           <label>Loại <select id="c-type"><option value="">Tất cả</option><option value="open">Mở mới</option><option value="close">Đóng cửa</option><option value="move">Dời vị trí</option></select></label>
           <label>Từ ngày <input id="c-from" type="date"></label>
           <label>Tỉnh <select id="c-tinh"><option value="">Tất cả</option></select></label>
@@ -105,7 +126,7 @@
         </div>
         <div class="kpis" id="c-kpis"></div>
         <div class="card"><div class="table-wrap tall"><table id="t-changes"><thead><tr>
-          <th>Ngày phát hiện</th><th>Loại</th><th>Mã BHX</th><th>Địa chỉ</th><th>Tỉnh</th><th class="num">WM+ trong 2 km</th><th class="num">WM+ gần nhất (km)</th>
+          <th>Ngày phát hiện</th><th>Đối thủ</th><th>Loại</th><th>Mã</th><th>Địa chỉ</th><th>Tỉnh</th><th class="num">WM+ trong 2 km</th><th class="num">WM+ gần nhất (km)</th>
         </tr></thead><tbody></tbody></table></div></div>
       </div>
 
@@ -115,11 +136,14 @@
           <h3>Cập nhật danh sách WM+</h3>
           <p class="muted">File Excel (.xlsx/.xls/.csv). Tự dò dòng tiêu đề trong 8 dòng đầu. Cột bắt buộc (một trong các tên):
             <b>Mã</b> <code>Mã WM+ / Mã CH / Mã SAP / Code</code> · <b>Tỉnh</b> <code>Tỉnh mới / Tỉnh/Thành / Tỉnh/TP / Tỉnh/TP cũ trước 1/7 / Tỉnh</code> ·
-            <b>Vĩ độ</b> <code>Latitude / Vĩ độ / Lat</code> · <b>Kinh độ</b> <code>Longitude / Kinh độ / Lng / Long</code>; tuỳ chọn <b>Tên</b> <code>Tên WM+ / Tên CH / Tên cửa hàng</code>.</p>
-          <p class="muted small">File được đọc ngay trên trình duyệt; chỉ 5 cột trên được gửi lên khi bạn bấm <b>Áp dụng</b>. Dữ liệu tự xoá sau 48 giờ.</p>
+            <b>Vĩ độ</b> <code>Latitude / Vĩ độ / Lat</code> · <b>Kinh độ</b> <code>Longitude / Kinh độ / Lng / Long</code>.
+            Tuỳ chọn: <b>Tên</b> <code>Tên WM+ / Tên CH / Tên cửa hàng</code> · <b>Khu vực</b> <code>Khu vực / Urban/Rural</code> (Urban, Rural, Thành thị, Nông thôn) ·
+            <b>Chuỗi</b> <code>Chuỗi / Chain</code> (WM+ hoặc WMT) · <b>Địa chỉ</b> <code>Địa chỉ / Address</code>.</p>
+          <p class="muted small">File được đọc ngay trên trình duyệt; chỉ các cột trên được gửi lên khi bạn bấm <b>Áp dụng</b>. Mỗi lần áp dụng <b>thay toàn bộ</b> danh sách cũ — muốn có cả WM+ và WMT thì để chung 1 file, phân biệt bằng cột Chuỗi. Dữ liệu tự xoá sau 48 giờ.</p>
           <div class="controls">
             <label>File <input type="file" id="up-file" accept=".xlsx,.xls,.csv"></label>
             <label>Sheet <select id="up-sheet" disabled></select></label>
+            <label>Chuỗi (nếu file không có cột Chuỗi) <select id="up-chuoi"><option>WM+</option><option>WMT</option></select></label>
           </div>
           <div id="up-result" hidden>
             <p id="up-map" class="small"></p>

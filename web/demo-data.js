@@ -25,8 +25,11 @@
   const wm = [], bhx = [];
   PROV.forEach(([tinh, lat, lng, sd, n], p) => {
     for (let i = 0; i < n; i++) {
-      const ma = "D" + String(p + 1) + String(i + 1).padStart(3, "0");
-      wm.push({ ma, ten: "WM+ demo " + ma, tinh, lat: +(lat + gauss() * sd).toFixed(6), lng: +(lng + gauss() * sd).toFixed(6) });
+      const ma = "D" + String(p + 1) + String(i + 1).padStart(3, "0"), g1 = gauss(), g2 = gauss();
+      const chuoi = rand() < 0.2 ? "WMT" : "WM+";
+      wm.push({ ma, ten: chuoi + " demo " + ma, tinh, lat: +(lat + g1 * sd).toFixed(6), lng: +(lng + g2 * sd).toFixed(6),
+        khu_vuc: Math.hypot(g1, g2) < 1 ? "Urban" : "Rural", chuoi,
+        dia_chi: `${Math.floor(rand() * 300) + 1} ${STREETS[Math.floor(rand() * STREETS.length)]}, ${tinh}` });
     }
     for (let i = 0; i < Math.round(n * 2.3); i++) {
       bhx.push({
@@ -34,6 +37,22 @@
         dia_chi: `BHX demo ${Math.floor(rand() * 300) + 1} ${STREETS[Math.floor(rand() * STREETS.length)]}, ${tinh}`,
         lat: +(lat + gauss() * sd * 1.3).toFixed(6), lng: +(lng + gauss() * sd * 1.3).toFixed(6),
       });
+    }
+  });
+  for (let i = 0; i < 160; i++) {                    // tỉnh chỉ có BHX, không có WM+
+    bhx.push({ ma: 90000 + bhx.length, tinh: "TP. Hà Nội",
+      dia_chi: `BHX demo ${Math.floor(rand() * 300) + 1} ${STREETS[Math.floor(rand() * STREETS.length)]}, Hà Nội`,
+      lat: +(21.03 + gauss() * 0.08).toFixed(6), lng: +(105.83 + gauss() * 0.08).toFixed(6) });
+  }
+
+  // Các chuỗi đối thủ khác (giả). Emart để trống vì chưa có nguồn dữ liệu.
+  const comp = [];
+  [["COOP", "Co.op demo", 40], ["GO", "GO! demo", 20], ["KFM", "Kingfood demo", 25], ["LOTTE", "LOTTE demo", 8]].forEach(([chain, ten, n]) => {
+    for (let i = 0; i < n; i++) {
+      const [tinh, lat, lng, sd] = PROV[Math.floor(rand() * PROV.length)];
+      comp.push({ chain, ma: chain.toLowerCase() + "-" + (i + 1), ten: `${ten} ${i + 1}`, tinh,
+        dia_chi: `${Math.floor(rand() * 300) + 1} ${STREETS[Math.floor(rand() * STREETS.length)]}, ${tinh}`,
+        lat: +(lat + gauss() * sd).toFixed(6), lng: +(lng + gauss() * sd).toFixed(6) });
     }
   });
 
@@ -70,7 +89,7 @@
     async getSettings() { return { ...settings }; },
     async setSetting(key, value) { settings[key] = value; },
     async getSnapshot() {
-      return { wm, bhx, bhxUpdated: "2026-10-30 06:00", wmVersion: versions[0].version + " — " + versions[0].uploaded.split(" ").pop(), wmExpires };
+      return { wm, bhx, comp, compUpdated: "2026-10-30 07:00", compStatus: "", bhxUpdated: "2026-10-30 06:00", wmVersion: versions[0].version + " — " + versions[0].uploaded.split(" ").pop(), wmExpires };
     },
     async getAccessLog() {
       const t = Date.now(), at = (h) => new Date(t - h * 3600e3).toISOString();
@@ -86,7 +105,7 @@
     async getVersions() { return versions.slice(); },
     async publishWm(rows) {                    // giống publish_wm_version: thay toàn bộ WM+, trả thống kê
       const d = window.WMUpload.diff(wm, rows), now = new Date();
-      wm.splice(0, wm.length, ...rows.map(({ ma, ten, tinh, lat, lng }) => ({ ma, ten, tinh, lat, lng })));
+      wm.splice(0, wm.length, ...rows.map(({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi }) => ({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi })));
       const v = { version: "v" + (versions.length + 1), uploaded: now.toLocaleString("vi-VN"), by: "admin.demo@example.com",
         rows: rows.length, added: d.added.length, removed: d.removed.length, moved: d.moved.length,
         status: "Còn hạn đến " + new Date(+now + 48 * 3600e3).toLocaleString("vi-VN") };
