@@ -36,9 +36,11 @@ const TABS = {
   wm_versions: ['id', 'version', 'uploaded_at', 'uploaded_by', 'file_id', 'n_rows', 'n_added', 'n_removed', 'n_moved', 'is_current', 'purged_at', 'purge_note'],
   bhx_stores:  ['store_id', 'dia_chi', 'province_id', 'tinh', 'lat', 'lng', 'first_seen', 'last_seen', 'is_active'],
   bhx_changes: ['detected_on', 'type', 'store_id', 'dia_chi', 'tinh', 'lat', 'lng', 'old_lat', 'old_lng'],
+  comp_stores: ['chain', 'store_id', 'ten', 'dia_chi', 'tinh', 'lat', 'lng', 'first_seen', 'last_seen', 'is_active'],
+  comp_changes: ['detected_on', 'chain', 'type', 'store_id', 'ten', 'dia_chi', 'tinh', 'lat', 'lng', 'old_lat', 'old_lng'],
   access_log:  ['at', 'email', 'event'],
 };
-const WM_COLS = ['ma', 'ten', 'tinh', 'lat', 'lng'];
+const WM_COLS = ['ma', 'ten', 'tinh', 'lat', 'lng', 'khu_vuc', 'chuoi', 'dia_chi'];
 
 // ───────────────────────── HTTP ─────────────────────────
 function doGet() {
@@ -239,7 +241,11 @@ function liveVersion_() {
 }
 function readWmFile_(fileId) {
   const v = SpreadsheetApp.openById(fileId).getSheets()[0].getDataRange().getValues();
-  return v.slice(1).map(function (r) { return { ma: String(r[0]), ten: String(r[1] || r[0]), tinh: String(r[2]), lat: Number(r[3]), lng: Number(r[4]) }; });
+  // File cũ chỉ có 5 cột → khu_vuc/dia_chi rỗng, chuoi mặc định WM+
+  return v.slice(1).map(function (r) {
+    return { ma: String(r[0]), ten: String(r[1] || r[0]), tinh: String(r[2]), lat: Number(r[3]), lng: Number(r[4]),
+      khu_vuc: String(r[5] || ''), chuoi: String(r[6] || 'WM+'), dia_chi: String(r[7] || '') };
+  });
 }
 
 function snapshot_() {
@@ -251,6 +257,11 @@ function snapshot_() {
   return {
     wm: v ? readWmFile_(String(v.file_id)) : [],
     bhx: bhx,
+    comp: compRows_('comp_stores').filter(function (r) { return isTrue_(r.is_active); }).map(function (r) {
+      return { chain: String(r.chain), ma: String(r.store_id), ten: String(r.ten), dia_chi: String(r.dia_chi), tinh: String(r.tinh), lat: Number(r.lat), lng: Number(r.lng) };
+    }),
+    compUpdated: st.comp_last_run || '',
+    compStatus: st.comp_last_status || '',
     wmVersion: v ? v.version + ' — ' + Utilities.formatDate(new Date(v.uploaded_at), CFG.TZ, 'dd/MM/yyyy') : 'chưa có',
     wmExpires: v ? new Date(new Date(v.uploaded_at).getTime() + CFG.WM_TTL_H * 3600e3).toISOString() : null,
     bhxUpdated: st.bhx_last_run || 'chưa chạy',
@@ -258,8 +269,8 @@ function snapshot_() {
 }
 
 function changes_() {
-  return readRows_('bhx_changes').map(function (r) {
-    return { date: String(r.detected_on), type: String(r.type), ma: Number(r.store_id), dia_chi: String(r.dia_chi), tinh: String(r.tinh),
+  return readRows_('bhx_changes').map(function (r) { return Object.assign({ chain: 'BHX' }, r); }).concat(compRows_('comp_changes')).map(function (r) {
+    return { date: String(r.detected_on), chain: String(r.chain), type: String(r.type), ma: String(r.store_id), dia_chi: String(r.dia_chi), tinh: String(r.tinh),
       lat: Number(r.lat), lng: Number(r.lng), old_lat: r.old_lat === '' ? null : Number(r.old_lat), old_lng: r.old_lng === '' ? null : Number(r.old_lng) };
   }).sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }).slice(0, 5000);
 }
@@ -304,7 +315,10 @@ function validateWm_(rows) {
     if (seen[ma]) throw new Error('Trùng mã ' + ma);
     seen[ma] = 1;
     if (!(lat >= b[0] && lat <= b[1] && lng >= b[2] && lng <= b[3])) throw new Error('Mã ' + ma + ': toạ độ ngoài lãnh thổ VN');
-    return { ma: ma, ten: String(r.ten || ma).slice(0, 200), tinh: String(r.tinh || '').slice(0, 100), lat: lat, lng: lng };
+    const chuoi = String(r.chuoi || 'WM+');
+    if (chuoi !== 'WM+' && chuoi !== 'WMT') throw new Error('Mã ' + ma + ': chuỗi phải là WM+ hoặc WMT');
+    return { ma: ma, ten: String(r.ten || ma).slice(0, 200), tinh: String(r.tinh || '').slice(0, 100), lat: lat, lng: lng,
+      khu_vuc: String(r.khu_vuc || '').slice(0, 30), chuoi: chuoi, dia_chi: String(r.dia_chi || '').slice(0, 300) };
   });
 }
 
@@ -316,8 +330,8 @@ function publishWm_(u, rowsRaw) {
     const version = 'v' + (all.length + 1);
     const ss = SpreadsheetApp.create('WM_upload_' + version + '_' + Utilities.formatDate(new Date(), CFG.TZ, 'yyyyMMdd_HHmm'));
     const sh = ss.getSheets()[0];
-    sh.getRange('A:E').setNumberFormat('@');
-    sh.getRange(1, 1, rows.length + 1, 5).setValues([WM_COLS].concat(rows.map(function (r) { return WM_COLS.map(function (k) { return r[k]; }); })));
+    sh.getRange('A:H').setNumberFormat('@');
+    sh.getRange(1, 1, rows.length + 1, WM_COLS.length).setValues([WM_COLS].concat(rows.map(function (r) { return WM_COLS.map(function (k) { return r[k]; }); })));
     DriveApp.getFileById(ss.getId()).moveTo(uploadFolder_());
 
     const old = {}; prev.forEach(function (w) { old[w.ma] = w; });
@@ -544,6 +558,184 @@ function syncBhxDaily() {
   }
 }
 
+// ───────────────────────── Tự lấy các chuỗi khác (lịch 07:00) ─────────────────────────
+// Chỉ đọc danh sách cửa hàng công khai trên web của từng chuỗi. Mỗi chuỗi độc lập: chuỗi lỗi thì giữ nguyên
+// dữ liệu cũ của chuỗi đó, các chuỗi khác vẫn cập nhật. Emart chưa có nguồn công khai nên chưa có ở đây.
+const COMP = {
+  COOP_LIST: 'https://co-opmart.com.vn/he-thong-sieu-thi',
+  GO: 'https://sieuthi-go.vn/api/store-get-list-store?lang=vi&platform=2',
+  TOPS: 'https://topsmarket.vn/wp-admin/admin-ajax.php',
+  LOTTE: 'https://www.lottemart.vn/v1/p/mart/bos/vi_nsg/V1/store/detail-list',
+  KFM: 'https://onelife-api.kingfoodmart.com/v1/gateway/',
+  KFM_QUERY: 'query PartnerStore($page: Int, $limit: Int, $lat: Float, $lng: Float) { partnerStore(page: $page, limit: $limit, lat: $lat, lng: $lng) { data { address storeCode openingDate lat lng } total } }',
+  KFM_PAGE: 100,
+  MAX_PAGES: 40,
+  // Tên tỉnh sau sáp nhập 1/7/2025, và tên cũ / cách viết khác quy về tỉnh mới
+  PROVINCES: ['Hà Nội', 'Hồ Chí Minh', 'Hải Phòng', 'Đà Nẵng', 'Huế', 'Cần Thơ', 'Tuyên Quang', 'Cao Bằng', 'Lai Châu', 'Lào Cai', 'Thái Nguyên', 'Điện Biên', 'Lạng Sơn', 'Sơn La', 'Phú Thọ', 'Bắc Ninh', 'Quảng Ninh', 'Hưng Yên', 'Ninh Bình', 'Thanh Hóa', 'Nghệ An', 'Hà Tĩnh', 'Quảng Trị', 'Quảng Ngãi', 'Gia Lai', 'Khánh Hòa', 'Lâm Đồng', 'Đắk Lắk', 'Đồng Nai', 'Tây Ninh', 'Vĩnh Long', 'Đồng Tháp', 'Cà Mau', 'An Giang'],
+  ALIASES: { 'Hà Nội': ['hanoi'], 'Hồ Chí Minh': ['hcm', 'binh duong', 'ba ria', 'vung tau', 'binh chanh', 'thu duc'], 'Lâm Đồng': ['binh thuan', 'dak nong', 'dac nong'], 'Gia Lai': ['binh dinh'], 'Đắk Lắk': ['dac lac', 'phu yen'], 'Khánh Hòa': ['ninh thuan'], 'Tây Ninh': ['long an'], 'Đồng Tháp': ['tien giang'], 'Vĩnh Long': ['ben tre', 'tra vinh'], 'Cà Mau': ['bac lieu'], 'An Giang': ['kien giang'], 'Cần Thơ': ['soc trang', 'hau giang'], 'Đồng Nai': ['binh phuoc'], 'Đà Nẵng': ['quang nam'], 'Quảng Trị': ['quang binh'], 'Quảng Ngãi': ['kon tum'], 'Hải Phòng': ['hai duong'], 'Hưng Yên': ['thai binh'], 'Ninh Bình': ['nam dinh', 'ha nam'], 'Bắc Ninh': ['bac giang'], 'Phú Thọ': ['vinh phuc', 'hoa binh'], 'Thái Nguyên': ['bac kan', 'bac can'], 'Tuyên Quang': ['ha giang'], 'Lào Cai': ['yen bai'] },
+};
+const plainVi_ = function (s) {
+  return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/tinh(?=[a-z])/g, 'tinh ');
+};
+// Tỉnh = tên tỉnh xuất hiện SAU CÙNG trong địa chỉ ("Phường Bình Dương, Thành phố Hồ Chí Minh" → Hồ Chí Minh).
+function tinhOf_(addr) {
+  const a = plainVi_(addr);
+  let best = '', at = -1;
+  const look = function (needle, name) {
+    const re = new RegExp('(^|[^a-z0-9])' + needle + '(?![a-z0-9])', 'g');
+    let m;
+    while ((m = re.exec(a))) { if (m.index > at) { at = m.index; best = name; } }
+  };
+  COMP.PROVINCES.forEach(function (p) {
+    look(plainVi_(p), p);
+    (COMP.ALIASES[p] || []).forEach(function (x) { look(x, p); });
+  });
+  return best;
+}
+const htmlText_ = function (s) {
+  return String(s).replace(/&#x([0-9a-f]+);/gi, function (_, h) { return String.fromCodePoint(parseInt(h, 16)); })
+    .replace(/&#(\d+);/g, function (_, d) { return String.fromCodePoint(Number(d)); })
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+};
+// fetchAll theo lô, thử lại tối đa 2 lần. Trả nội dung dạng chữ; còn request lỗi thì báo lỗi cả chuỗi.
+function compTexts_(reqs) {
+  const out = new Array(reqs.length);
+  let todo = reqs.map(function (_, i) { return i; });
+  for (let attempt = 0; attempt < 3 && todo.length; attempt++) {
+    if (attempt) Utilities.sleep(2000 * attempt);
+    const failed = [];
+    for (let s = 0; s < todo.length; s += BHX.BATCH) {
+      const idx = todo.slice(s, s + BHX.BATCH);
+      let res;
+      try {
+        res = UrlFetchApp.fetchAll(idx.map(function (i) { return Object.assign({ muteHttpExceptions: true }, reqs[i]); }));
+      } catch (e) { Array.prototype.push.apply(failed, idx); continue; }
+      res.forEach(function (r, k) { if (r.getResponseCode() === 200) out[idx[k]] = r.getContentText(); else failed.push(idx[k]); });
+    }
+    todo = failed;
+  }
+  if (todo.length) throw new Error('lỗi ' + todo.length + '/' + reqs.length + ' request, vd: ' + reqs[todo[0]].url);
+  return out;
+}
+const compJson_ = function (req) { return JSON.parse(compTexts_([req])[0]); };
+
+function parseCoopDetail_(slug, html) {
+  const la = /!3d(-?\d+\.\d+)/.exec(html), lo = /!2d(-?\d+\.\d+)/.exec(html), ti = /<title>([\s\S]*?)<\/title>/.exec(html);
+  const i = html.indexOf('class="last"');
+  if (!la || !lo || i < 0) return null;
+  const parts = html.slice(i, i + 3000).replace(/<[^>]+>/g, '|').split('|').map(function (x) { return htmlText_(x).trim(); }).filter(String);
+  return { store_id: slug, ten: ti ? htmlText_(ti[1]).trim() : slug, dia_chi: parts[2] || '', lat: la[1], lng: lo[1] };
+}
+function fetchCoop_() {
+  const slugs = {};
+  for (let p = 1; p <= COMP.MAX_PAGES; p++) {
+    const t = compTexts_([{ url: COMP.COOP_LIST + '?searchName=&searchOption=0&page=' + p }])[0], re = /\/he-thong-sieu-thi\/([a-z0-9-]+)/g;
+    let m, fresh = 0;
+    while ((m = re.exec(t))) { if (!slugs[m[1]]) { slugs[m[1]] = 1; fresh++; } }
+    if (!fresh) break;
+  }
+  const list = Object.keys(slugs);
+  const texts = compTexts_(list.map(function (s) { return { url: COMP.COOP_LIST + '/' + s }; }));
+  const rows = list.map(function (s, i) { return parseCoopDetail_(s, texts[i]); }).filter(Boolean);
+  if (rows.length < list.length * 0.9) throw new Error('đọc được toạ độ ' + rows.length + '/' + list.length + ' — web có thể đã đổi cấu trúc');
+  return rows;
+}
+// GO!, Big C và Tops Market cùng 1 nút lọc; lấy thiếu 1 trong 2 nguồn thì coi cả nhóm là lỗi để không báo đóng cửa sai.
+function fetchGo_() {
+  const go = compJson_({ url: COMP.GO }).message;
+  const tops = compJson_({ url: COMP.TOPS, method: 'post', payload: { action: 'dvls_load_localstores', cityid: '', districtid: '' } }).data;
+  if (!Array.isArray(go) || !Array.isArray(tops)) throw new Error('dữ liệu GO!/Tops sai định dạng');
+  return go.map(function (s) { return { store_id: s.storeID, ten: s.name, dia_chi: s.address, lat: s.latitude, lng: s.longtitude }; })
+    .concat(tops.map(function (s) { return { store_id: 'tops-' + s.id, ten: s.title, dia_chi: s.address, lat: s.maps_lat, lng: s.maps_lng }; }));
+}
+function fetchLotte_() {
+  const list = compJson_({ url: COMP.LOTTE });
+  if (!Array.isArray(list)) throw new Error('dữ liệu LOTTE sai định dạng');
+  return list.filter(function (s) { return String(s.status) === '1'; }).map(function (s) {
+    return { store_id: s.store_code, ten: 'LOTTE Mart ' + String(s.name).trim(), dia_chi: s.store_address, lat: s.latitude, lng: s.longitude };
+  });
+}
+// Bỏ cửa hàng chưa tới ngày khai trương và cửa hàng web chưa có toạ độ (lat/lng = 1).
+function fetchKfm_() {
+  const today = todayVN_(), all = [];
+  for (let p = 1; p <= COMP.MAX_PAGES; p++) {
+    const d = compJson_({ url: COMP.KFM, method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ operationName: 'PartnerStore', variables: { page: p, limit: COMP.KFM_PAGE, lat: 0, lng: 0 }, query: COMP.KFM_QUERY }) }).data.partnerStore;
+    Array.prototype.push.apply(all, d.data || []);
+    if (!(d.data || []).length || all.length >= d.total) {
+      if (all.length < d.total) throw new Error('lấy thiếu ' + all.length + '/' + d.total);
+      break;
+    }
+  }
+  return all.filter(function (s) { return String(s.openingDate || '').slice(0, 10) <= today && Math.abs(Number(s.lat)) >= 2; }).map(function (s) {
+    return { store_id: s.storeCode, ten: 'Kingfoodmart ' + s.storeCode, dia_chi: s.address, lat: s.lat, lng: s.lng };
+  });
+}
+const COMP_FETCH = { COOP: fetchCoop_, GO: fetchGo_, KFM: fetchKfm_, LOTTE: fetchLotte_ };
+
+// Tab chưa tạo (chưa chạy lại setup) → coi như chưa có dữ liệu, không làm hỏng trang.
+function compRows_(tab) { return db_().getSheetByName(tab) ? readRows_(tab) : []; }
+
+// So với lần trước, cùng quy tắc và cùng guard với BHX; chỉ đụng tới dòng của chuỗi này.
+function syncCompCore_(chain, raw) {
+  const b = CFG.BBOX, seenIds = {}, stores = [];
+  raw.forEach(function (s) {
+    const id = String(s.store_id), lat = Number(String(s.lat).trim()), lng = Number(String(s.lng).trim());
+    if (!id || seenIds[id] || !(lat >= b[0] && lat <= b[1] && lng >= b[2] && lng <= b[3])) return;
+    seenIds[id] = 1;
+    stores.push({ chain: chain, store_id: id, ten: String(s.ten || '').trim(), dia_chi: String(s.dia_chi || '').trim(), tinh: tinhOf_(s.dia_chi),
+      lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 });
+  });
+  if (!stores.length) throw new Error('không lấy được cửa hàng nào');
+  return withLock_(function () {
+    const all = readRows_('comp_stores'), today = todayVN_();
+    const old = all.filter(function (r) { return String(r.chain) === chain; }), others = all.filter(function (r) { return String(r.chain) !== chain; });
+    const base = old.length === 0, o = {};
+    old.forEach(function (r) { o[String(r.store_id)] = r; });
+    const open = [], move = [];
+    stores.forEach(function (n) {
+      const p = o[n.store_id];
+      if (!p || !isTrue_(p.is_active)) open.push(n);
+      else if (km_(Number(p.lat), Number(p.lng), n.lat, n.lng) > CFG.MOVE_KM) move.push({ n: n, p: p });
+    });
+    const active = old.filter(function (r) { return isTrue_(r.is_active); });
+    const close = active.filter(function (r) { return !seenIds[String(r.store_id)]; });
+    if (active.length && close.length / active.length > CFG.MAX_CLOSE_RATIO) {
+      throw new Error('Guard: ' + close.length + '/' + active.length + ' cửa hàng bị coi là đóng (> 30%) — nghi nguồn trả thiếu, không ghi');
+    }
+    if (!base) {
+      const ev = function (s, type, extra) {
+        return Object.assign({ detected_on: today, chain: chain, type: type, store_id: s.store_id, ten: s.ten, dia_chi: s.dia_chi, tinh: s.tinh, lat: s.lat, lng: s.lng, old_lat: '', old_lng: '' }, extra || {});
+      };
+      append_('comp_changes', open.map(function (n) { return ev(n, 'open'); })
+        .concat(move.map(function (m) { return ev(m.n, 'move', { old_lat: m.p.lat, old_lng: m.p.lng }); }))
+        .concat(close.map(function (p) { return ev(p, 'close'); })));
+    }
+    const rows = stores.map(function (n) {
+      const p = o[n.store_id];
+      return Object.assign({}, n, { first_seen: p ? p.first_seen : today, last_seen: today, is_active: true });
+    }).concat(old.filter(function (r) { return !seenIds[String(r.store_id)]; }).map(function (r) { return Object.assign({}, r, { is_active: false }); }));
+    writeAll_('comp_stores', others.concat(rows));
+    return { baseline: base, stores: stores.length, open: base ? 0 : open.length, close: base ? 0 : close.length, move: base ? 0 : move.length };
+  });
+}
+
+// Lịch chạy hằng ngày (setup tạo, 07:00). Chạy tay được để thử. Kết quả từng chuỗi ghi vào settings.comp_last_status.
+function syncCompDaily() {
+  const status = {}, time = Utilities.formatDate(new Date(), CFG.TZ, 'yyyy-MM-dd HH:mm');
+  Object.keys(COMP_FETCH).forEach(function (chain) {
+    try {
+      const r = syncCompCore_(chain, COMP_FETCH[chain]());
+      status[chain] = { ok: true, at: time, msg: r.stores + ' cửa hàng · mở ' + r.open + ' · đóng ' + r.close + ' · dời ' + r.move + (r.baseline ? ' · baseline' : '') };
+    } catch (e) {
+      status[chain] = { ok: false, at: time, msg: String(e.message || e).slice(0, 300) };
+    }
+    Logger.log(chain + ': ' + status[chain].msg);
+  });
+  withLock_(function () { putSetting_('comp_last_run', time); putSetting_('comp_last_status', JSON.stringify(status)); });
+  return status;
+}
+
 // ───────────────────────── Phân quyền / nhật ký ─────────────────────────
 function listUsers_() {
   return readRows_('users').map(function (r) { return { email: String(r.email), role: String(r.role), added: String(r.added_at).slice(0, 10) }; });
@@ -590,10 +782,11 @@ function setup() {
   if (!props.getProperty('SYNC_SECRET')) props.setProperty('SYNC_SECRET', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, ''));
 
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (['purgeExpiredWm', 'syncBhxDaily'].indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t);
+    if (['purgeExpiredWm', 'syncBhxDaily', 'syncCompDaily'].indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('purgeExpiredWm').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('syncBhxDaily').timeBased().atHour(6).everyDays(1).create();
+  ScriptApp.newTrigger('syncCompDaily').timeBased().atHour(7).everyDays(1).create();
   uploadFolder_();
   Logger.log('Xong. Admin đầu tiên: %s', owner);
   // Không in khoá ra log (log có thể bị chụp màn hình). Xem trong Cài đặt dự án → Thuộc tính tập lệnh.
