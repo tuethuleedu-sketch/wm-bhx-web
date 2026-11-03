@@ -3,7 +3,7 @@
 ```
 bhx_fetch.py      API BHX (JSON) ──► data/bhx_stores.csv  (+ bhx_new_stores_YYYYMMDD.csv)
 wm_bhx_match.py   WM+ file + BHX snapshot ──BallTree──► output/wm_bhx_pairs.csv | wm_summary.csv | wm_bhx_wide.csv
-web/ + gas/       Web app có đăng nhập OTP (thay Power BI): GitHub Pages + Apps Script + Google Sheet — hướng dẫn: SETUP_GOOGLE.md
+web/ + gas/       Web app có đăng nhập bằng mật khẩu (thay Power BI): GitHub Pages + Apps Script + Google Sheet — hướng dẫn: SETUP_GOOGLE.md
 run_daily.bat     chạy cả 2 bước (1 click / Task Scheduler)
 tests/            mock API + benchmark + đối chiếu brute-force
 ```

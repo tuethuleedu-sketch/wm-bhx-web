@@ -1,13 +1,13 @@
 # Hướng dẫn triển khai: GitHub + Google Sheet + Google Apps Script
 
 Tổng thời gian khoảng **30–40 phút**. Bạn tự tạo, tự đăng nhập và tự giữ mọi tài khoản và khoá.
-**Không gửi `SYNC_SECRET`, mật khẩu hay mã OTP cho ai, kể cả Claude.** Tên menu của Google/GitHub có thể lệch chút theo thời điểm.
+**Không gửi `SYNC_SECRET` hay mật khẩu (kể cả mật khẩu tạm) cho ai, kể cả Claude.** Tên menu của Google/GitHub có thể lệch chút theo thời điểm.
 
 ```
 Trình duyệt ──► GitHub Pages (web/: giao diện, KHÔNG chứa dữ liệu)
      │
      └─ HTTPS ──► Apps Script Web app (chạy bằng tài khoản Google của bạn)
-                     ├─ kiểm tra phiên đăng nhập OTP + quyền ở MỖI yêu cầu
+                     ├─ kiểm tra phiên đăng nhập + quyền ở MỖI yêu cầu
                      ├─ Google Sheet "WM_BHX_DB": users · settings · wm_versions · bhx_stores · bhx_changes · access_log
                      └─ WM+ mỗi lần upload = 1 file Sheet riêng → XOÁ VĨNH VIỄN sau 48 giờ
 Apps Script syncBhxDaily 06:00 ──► API BHX ──► tab bhx_stores / bhx_changes   (chạy trên máy chủ Google)
@@ -28,7 +28,7 @@ Lưu ý: API BHX chặn máy chủ GitHub (đã thử 30/10/2026) nhưng cho má
      (Manifest này bật sẵn **Drive API** để xoá vĩnh viễn file WM+, đặt múi giờ Việt Nam và cấu hình Web app.)
 4. Chạy cài đặt lần đầu: ở thanh trên chọn hàm **`setup`** → **Run**.
    - Google hỏi quyền → **Review permissions** → chọn tài khoản → nếu thấy "Google hasn't verified this app": **Advanced → Go to … (unsafe)**. Đây là script của chính bạn, không phải app bên ngoài.
-     Các quyền cần: Sheets (database), Drive (tạo/xoá file WM+), Gmail gửi mail (mã OTP), chạy theo lịch, kết nối ngoài.
+     Các quyền cần: Sheets (database), Drive (tạo/xoá file WM+), chạy theo lịch, kết nối ngoài.
    - Xem **Execution log** ở dưới:
      - `Admin đầu tiên: <email của bạn>`
      - `SYNC_SECRET (...): <chuỗi 64 ký tự>` → **copy, cất vào trình quản lý mật khẩu**. Dùng ở bước 4.
@@ -40,7 +40,7 @@ Lưu ý: API BHX chặn máy chủ GitHub (đã thử 30/10/2026) nhưng cho má
    - Who has access: **Anyone**
    - **Deploy** → copy **Web app URL** (dạng `https://script.google.com/macros/s/…/exec`).
 
-   "Anyone" nghĩa là ai cũng *gọi* được URL. Mọi dữ liệu vẫn cần đăng nhập OTP, và email phải có trong tab `users`.
+   "Anyone" nghĩa là ai cũng *gọi* được URL. Mọi dữ liệu vẫn cần đăng nhập bằng mật khẩu, và email phải có trong tab `users`.
 
 > **Sửa code Apps Script sau này:** dán code mới → Lưu → **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**.
 > Giữ nguyên URL. Không bấm "New deployment", vì như vậy sẽ ra URL mới.
@@ -54,7 +54,7 @@ Mở Web app URL trên trình duyệt → phải thấy `{"ok":true,"service":"w
    mode: "gas",
    gasUrl: "https://script.google.com/macros/s/…/exec",   // URL ở bước 1.5
    ```
-   URL này nằm công khai trong code web, không sao: không có mã OTP thì không lấy được dữ liệu.
+   URL này nằm công khai trong code web, không sao: không có mật khẩu thì không lấy được dữ liệu.
 2. Trong thư mục `wm_bhx_pipeline`:
    ```
    python make_release.py
@@ -94,8 +94,8 @@ SYNC_SECRET=chuỗi-64-ký-tự
 | # | Việc | Kết quả đúng |
 |---|---|---|
 | 1 | Mở link GitHub Pages ở cửa sổ ẩn danh | Chỉ thấy trang đăng nhập, **không** có banner "CHẾ ĐỘ DEMO" |
-| 2 | Nhập email của bạn → Gửi mã → mở Gmail → nhập mã | Vào được, quyền Admin (mail có thể vào Spam lần đầu) |
-| 3 | Nhập 1 email **chưa** cấp quyền | Vẫn báo "Đã gửi mã" nhưng **không có mail**; tab Phân quyền → Nhật ký có dòng "Bị từ chối" |
+| 2 | Trong Apps Script chạy `taoMatKhauAdmin` → lấy mật khẩu tạm ở nhật ký → đăng nhập → đặt mật khẩu mới | Vào được, quyền Admin |
+| 3 | Nhập 1 email **chưa** cấp quyền | Báo "Email hoặc mật khẩu không đúng"; tab Phân quyền → Nhật ký có dòng "Bị từ chối" |
 | 4 | Tổng quan | "… BHX, cập nhật <giờ Action chạy>" |
 | 5 | Tab WM+ (upload) → chọn file MASTER → xem trước → Áp dụng | Bản đồ hiện WM+; dòng thông tin có "tự xoá … còn 48 giờ"; Drive có thư mục `WM_BHX_uploads (tu xoa sau 48h)` chứa 1 file |
 | 6 | Tab Phân quyền → cấp 1 đồng nghiệp (Viewer) → họ đăng nhập | Thấy dữ liệu; không thấy tab Upload/Phân quyền |
@@ -106,7 +106,7 @@ SYNC_SECRET=chuỗi-64-ký-tự
 - **WM+ tự xoá sau 48 giờ** tính từ lúc upload; muốn xem tiếp thì upload lại. BHX và lịch sử thay đổi BHX được giữ.
   Nếu `purge_note` ghi "chỉ chuyển vào thùng rác" → Drive API chưa bật: Apps Script → **Services (+) → Drive API → Add**, rồi tự xoá file trong Thùng rác Drive.
 - **Phiên đăng nhập 6 giờ**; đóng tab là phải nhập mã lại. Thu hồi quyền có hiệu lực ngay.
-- **Gmail cá nhân gửi khoảng 100 mail/ngày** qua Apps Script; web tự giới hạn 80 mã/ngày, mỗi email 1 mã/phút.
+- **Mật khẩu:** sai 5 lần thì email đó bị khoá 15 phút. Đồng nghiệp quên mật khẩu: Admin bấm "Cấp lại mật khẩu" trong tab Phân quyền. Admin quên mật khẩu: chạy `taoMatKhauAdmin` trong Apps Script.
 - **Sheet chính** (users, BHX, nhật ký) có lịch sử phiên bản của Google như mọi file Sheet. WM+ không nằm ở đây, nên không bị lưu lại trong lịch sử.
 - **Bạn là chủ Sheet** nên mở và sửa trực tiếp được mọi tab, kể cả nhật ký. "Không sửa được nhật ký" chỉ áp dụng với người dùng qua web.
 - **Dữ liệu nằm trên máy chủ Google** (không chọn được nơi lưu với tài khoản cá nhân). Nếu bạn dùng các tính năng Gemini trong Drive/Sheets thì Gemini có thể đọc file khi bạn gọi nó. Muốn chắc chắn thì không dùng Gemini trên các file này.
@@ -115,7 +115,7 @@ SYNC_SECRET=chuỗi-64-ký-tự
 - Bản đồ nền dùng tile OpenStreetMap (miễn phí, có chính sách sử dụng hợp lý); dùng nội bộ ít người thì ổn.
 
 ## Test có sẵn (cho người bảo trì)
-- `gas/test/run_tests.html`: 66 test backend `Code.gs` trên môi trường Google giả lập (OTP, quyền, upload, hết hạn 48h, đồng bộ BHX, thu hồi, nhật ký).
+- `gas/test/run_tests.html`: test backend `Code.gs` trên môi trường Google giả lập (mật khẩu, quyền, upload, hết hạn 48h, đồng bộ BHX, thu hồi, nhật ký).
 - `gas/test/e2e.html`: web thật + `Code.gs` giả lập, đăng nhập → upload → xem.
 - Chạy: `python -m http.server 8766 -d .` trong `wm_bhx_pipeline` → mở `http://localhost:8766/gas/test/run_tests.html`.
 - Giả lập **không** kiểm được quota, độ trễ, hay việc gửi mail thật của Google.
