@@ -121,7 +121,10 @@ i.lab { font-style: normal; }
 .bar-val { text-align: right; font-variant-numeric: tabular-nums; }
 
 .table-wrap { max-height: 340px; overflow: auto; border-top: 1px solid var(--line); }
+.gmap-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-weight: 400; }
 .table-wrap.tall { max-height: 620px; }
+.pager { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
+.pager button:disabled { text-decoration: none; opacity: 0.4; cursor: default; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; }
 th { position: sticky; top: 0; background: var(--surface); color: var(--muted); font-weight: 600; cursor: default; }

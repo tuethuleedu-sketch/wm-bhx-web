@@ -10,7 +10,8 @@
       try { sessionStorage.removeItem(KEY); v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (_) {}
     },
   };
-  let token = store.get();
+  let token = store.get(), boot = null;
+  const snapOf = (d) => ({ ...d, wmExpires: d.wmExpires ? new Date(d.wmExpires) : null });
 
   async function call(action, payload = {}) {
     let r;
@@ -32,7 +33,13 @@
     mode: "gas",
     async currentUser() {
       if (!token) return null;
-      try { return await call("me"); } catch (_) { return null; }
+      // Mở lại bằng phiên đã lưu: lấy luôn dữ liệu ban đầu trong cùng 1 lần gọi, getBoot dùng lại kết quả này.
+      try { boot = await call("boot", { resume: true }); return boot.me; } catch (_) { return null; }
+    },
+    async getBoot() {
+      const b = boot || await call("boot");
+      boot = null;
+      return { ...b, snapshot: snapOf(b.snapshot) };
     },
     async signIn(email, password) {
       const d = await call("login", { email, password });
@@ -47,10 +54,7 @@
     },
     resetPassword: (email) => call("resetPassword", { email }),
     async signOut() { try { await call("logout"); } finally { token = null; store.set(null); } },
-    async getSnapshot() {
-      const d = await call("snapshot");
-      return { ...d, wmExpires: d.wmExpires ? new Date(d.wmExpires) : null };
-    },
+    getSnapshot: async () => snapOf(await call("snapshot")),
     getChanges: () => call("changes"),
     getVersions: () => call("versions"),
     getSettings: () => call("settings"),

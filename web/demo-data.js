@@ -27,8 +27,11 @@
     for (let i = 0; i < n; i++) {
       const ma = "D" + String(p + 1) + String(i + 1).padStart(3, "0"), g1 = gauss(), g2 = gauss();
       const chuoi = rand() < 0.2 ? "WMT" : "WM+";
+      // Vùng/Miền giả: Thái Bình chia 2 vùng, Hà Nam để trống — để xem đủ các trường hợp
+      const vung = p === 8 ? "" : p < 2 ? "Vùng 1" : p < 3 || p === 4 ? "Vùng 2" : p === 3 ? (g2 < 0 ? "Vùng 1" : "Vùng 3") : "Vùng 3";
       wm.push({ ma, ten: chuoi + " demo " + ma, tinh, lat: +(lat + g1 * sd).toFixed(6), lng: +(lng + g2 * sd).toFixed(6),
         khu_vuc: Math.hypot(g1, g2) < 1 ? "Urban" : "Rural", chuoi,
+        vung, mien: !vung ? "" : vung === "Vùng 3" ? "Miền Y" : "Miền X",
         dia_chi: `${Math.floor(rand() * 300) + 1} ${STREETS[Math.floor(rand() * STREETS.length)]}, ${tinh}` });
     }
     for (let i = 0; i < Math.round(n * 2.3); i++) {
@@ -105,6 +108,7 @@
       ];
     },
     async getChanges() { return changes; },
+    async getBoot() { return { settings: await this.getSettings(), snapshot: await this.getSnapshot(), changes: await this.getChanges() }; },
     async getVersions() { return versions.slice(); },
     async publishWm(rows) {                    // giống publish_wm_version: thay toàn bộ WM+, trả thống kê
       const d = window.WMUpload.diff(wm, rows), now = new Date();

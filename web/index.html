@@ -67,6 +67,8 @@
             <div id="chips" class="chips"></div></div>
           <label>Chuỗi WM <select id="chuoi"><option value="">Tất cả</option><option>WM+</option><option>WMT</option></select></label>
           <label>Khu vực <select id="khu"><option value="">Tất cả</option><option>Urban</option><option>Rural</option><option value="-">Chưa phân loại</option></select></label>
+          <label>Miền <select id="mien" title="Theo cột Miền của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều miền thì theo WM gần nhất"><option value="">Tất cả</option></select></label>
+          <label>Vùng <select id="vung" title="Theo cột Vùng của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều vùng thì theo WM gần nhất"><option value="">Tất cả</option></select></label>
           <label class="combo">Tỉnh <input id="tinh-q" placeholder="Tất cả — gõ để tìm tỉnh" autocomplete="off">
             <div class="combo-list" id="tinh-list" hidden></div></label>
           <label>Bán kính (km) <input id="r-num" type="number" min="0.1" max="30" step="0.1" value="1"></label>
@@ -111,6 +113,7 @@
           </div>
           <p class="muted small" id="wm-hint"></p>
           <div class="table-wrap tall"><table id="t-wm"><thead></thead><tbody></tbody></table></div>
+          <div class="pager small" id="wm-pager"></div>
         </div>
 
         <div class="card">
@@ -125,6 +128,8 @@
           <label>Đối thủ <select id="c-chain"><option value="">Tất cả</option></select></label>
           <label>Loại <select id="c-type"><option value="">Tất cả</option><option value="open">Mở mới</option><option value="close">Đóng cửa</option><option value="move">Dời vị trí</option></select></label>
           <label>Từ ngày <input id="c-from" type="date"></label>
+          <label>Miền <select id="c-mien"><option value="">Tất cả</option></select></label>
+          <label>Vùng <select id="c-vung"><option value="">Tất cả</option></select></label>
           <label>Tỉnh <select id="c-tinh"><option value="">Tất cả</option></select></label>
           <button class="ghost" id="exp-changes">Xuất CSV</button>
         </div>
@@ -142,7 +147,7 @@
             <b>Mã</b> <code>Mã WM+ / Mã CH / Mã SAP / Code</code> · <b>Tỉnh</b> <code>Tỉnh mới / Tỉnh/Thành / Tỉnh/TP / Tỉnh/TP cũ trước 1/7 / Tỉnh</code> ·
             <b>Vĩ độ</b> <code>Latitude / Vĩ độ / Lat</code> · <b>Kinh độ</b> <code>Longitude / Kinh độ / Lng / Long</code>.
             Tuỳ chọn: <b>Tên</b> <code>Tên WM+ / Tên CH / Tên cửa hàng</code> · <b>Khu vực</b> <code>Khu vực / Urban/Rural</code> (Urban, Rural, Thành thị, Nông thôn) ·
-            <b>Chuỗi</b> <code>Chuỗi / Chain</code> (WM+ hoặc WMT) · <b>Địa chỉ</b> <code>Địa chỉ / Address</code>.</p>
+            <b>Chuỗi</b> <code>Chuỗi / Chain</code> (WM+ hoặc WMT) · <b>Địa chỉ</b> <code>Địa chỉ / Address</code> · <b>Miền</b> <code>Miền / Vùng miền</code> · <b>Vùng</b> <code>Vùng / Region / Zone</code> (ghi sao lên bộ lọc vậy).</p>
           <p class="muted small">File được đọc ngay trên trình duyệt; chỉ các cột trên được gửi lên khi bạn bấm <b>Áp dụng</b>. Mỗi lần áp dụng <b>thay toàn bộ</b> danh sách cũ — muốn có cả WM+ và WMT thì để chung 1 file, phân biệt bằng cột Chuỗi. Dữ liệu tự xoá sau 48 giờ.</p>
           <div class="controls">
             <label>File <input type="file" id="up-file" accept=".xlsx,.xls,.csv"></label>
@@ -186,12 +191,12 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="config.js"></script>
   <script src="demo-data.js"></script>
   <script src="gas-api.js"></script>
   <script src="upload.js"></script>
   <script src="area.js"></script>
+  <script src="nearby.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

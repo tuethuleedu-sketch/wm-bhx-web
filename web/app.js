@@ -1,8 +1,8 @@
-// WM+ ↔ BHX — giao diện. Tính khoảng cách ngay trên trình duyệt (haversine, cùng công thức với wm_bhx_match.py).
+// WM+ ↔ BHX — giao diện. Tính khoảng cách ngay trên trình duyệt (nearby.js, cùng công thức với wm_bhx_match.py).
 (function () {
   const CFG = window.APP_CONFIG;
   const API = CFG.mode === "demo" ? window.DemoAPI : window.GasAPI;
-  const EARTH_R_KM = 6371.0088, R_MAX = 30, TOP_MIN = 10, TABLE_CELLS = 200000;
+  const R_MAX = 30, TOP_MIN = 10, TABLE_CELLS = 200000;
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (x, d = 0) => x.toLocaleString("vi-VN", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -16,45 +16,58 @@
   const chainName = (c) => (CHAINS[c] || { name: c }).name;
   // S.all: mọi đối thủ đã tải; S.bhx: phần đang bật ở nút lọc — toàn bộ phép tính khoảng cách chỉ dùng S.bhx.
   let S = { user: null, wm: [], all: [], bhx: [], chains: new Set(["BHX"]), compStatus: {}, near: null, nearIdx: null, pairsBy: null, Rcalc: 0, R: 1, topBy: null, topN: 5,
-    tinh: "", chuoi: "", khu: "", q: "", sel: null, sortK: "n", sortDir: -1 };
+    mien: "", vung: "", tinh: "", chuoi: "", khu: "", q: "", sel: null, sortK: "n", sortDir: -1 };
 
   // ---------- Tính toán ----------
-  function haversine(la1, lo1, cla1, la2, lo2, cla2) {
-    const a = Math.sin((la2 - la1) / 2) ** 2 + cla1 * cla2 * Math.sin((lo2 - lo1) / 2) ** 2;
-    return 2 * EARTH_R_KM * Math.asin(Math.sqrt(a));
-  }
-  // Lưu sẵn các cặp WM–BHX trong bán kính Rcalc (≥ 5 km, tự tăng khi kéo R lớn hơn).
+  // Lưu sẵn các cặp WM–BHX trong bán kính Rcalc (≥ 5 km, tự tăng khi kéo R lớn hơn) và K đối thủ gần nhất, không phụ thuộc R.
   function computeAll() {
-    const rad = Math.PI / 180, wm = S.wm, bhx = S.bhx, n = wm.length, m = bhx.length;
     S.Rcalc = Math.max(CFG.maxRadiusKm, Math.ceil(S.R));
-    const bLa = new Float64Array(m), bLo = new Float64Array(m), bC = new Float64Array(m);
-    for (let j = 0; j < m; j++) { bLa[j] = bhx[j].lat * rad; bLo[j] = bhx[j].lng * rad; bC[j] = Math.cos(bLa[j]); }
-    S.near = new Float64Array(n); S.nearIdx = new Int32Array(n); S.pairsBy = []; S.topBy = [];
-    const K = S.topK = Math.max(TOP_MIN, S.topN), sortAll = K > 50;   // K lớn: sắp xếp cả danh sách nhanh hơn chèn từng phần tử
-    for (let i = 0; i < n; i++) {
-      const la = wm[i].lat * rad, lo = wm[i].lng * rad, c = Math.cos(la), list = [], top = [];   // top: K đối thủ gần nhất, không phụ thuộc R
-      let best = Infinity, bi = -1;
-      for (let j = 0; j < m; j++) {
-        const d = haversine(la, lo, c, bLa[j], bLo[j], bC[j]);
-        if (d < best) { best = d; bi = j; }
-        if (d <= S.Rcalc) list.push([j, Math.round(d * 1000) / 1000]);
-        if (sortAll) top.push([j, d]);
-        else if (top.length < K || d < top[top.length - 1][1]) {
-          let k = top.length; while (k > 0 && top[k - 1][1] > d) k--;
-          top.splice(k, 0, [j, d]); if (top.length > K) top.pop();
-        }
-      }
-      list.sort((a, b) => a[1] - b[1]);
-      if (sortAll) top.sort((a, b) => a[1] - b[1]);
-      S.near[i] = Math.round(best * 1000) / 1000; S.nearIdx[i] = bi; S.pairsBy.push(list);
-      S.topBy.push(top.slice(0, K).map(([j, d]) => [j, Math.round(d * 1000) / 1000]));
-    }
+    S.topK = Math.max(TOP_MIN, S.topN);
+    const r = Nearby.matrix(S.wm, S.bhx, S.topK, S.Rcalc);
+    S.near = r.near; S.nearIdx = r.nearIdx; S.pairsBy = r.pairsBy; S.topBy = r.topBy;
     nearB = null;
   }
   const countIn = (list, R) => { let k = 0; while (k < list.length && list[k][1] <= R) k++; return k; };
   // Khoá tỉnh: bỏ dấu, bỏ tiền tố "Tỉnh/TP./Thành phố" → "TP. Hồ Chí Minh" (BHX) khớp "Hồ Chí Minh" (file WM+).
   const provKey = (t) => plain(t).replace(/^\s*(thanh pho|tinh|tp\.?|t\.)\s*/, "").replace(/[^a-z0-9]/g, "").replace(/^hcm$/, "hochiminh");
-  const inProv = (x) => !S.tinh || provKey(x.tinh) === S.tinh;
+  // Miền, Vùng lấy từ các cột cùng tên của file WM+. Đối thủ không có các cột này nên suy theo tỉnh: tỉnh thuộc 1 vùng → vùng đó;
+  // tỉnh chia nhiều vùng → vùng của WM gần nhất trong tỉnh; tỉnh không có WM → chưa rõ ("-"). Miền tính độc lập theo cùng quy tắc.
+  let WM_IN_PROV = {};
+  function regionAt(x, dim) {
+    const list = WM_IN_PROV[dim].get(provKey(x.tinh)); if (!list) return "-";
+    const c = Math.cos(x.lat * Math.PI / 180);
+    let best = list[0], min = Infinity;
+    if (list.some((w) => w[dim] !== best[dim])) list.forEach((w) => {
+      const d = (w.lat - x.lat) ** 2 + ((w.lng - x.lng) * c) ** 2;
+      if (d < min) { min = d; best = w; }
+    });
+    return best[dim];
+  }
+  const regionOpts = (wms, rows, dim) => `<option value="">Tất cả</option>`
+    + [...new Set(wms.map((w) => w[dim]))].filter((v) => v !== "-").sort((a, b) => a.localeCompare(b, "vi", { numeric: true })).map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")
+    + (rows.some((x) => x[dim] === "-") ? `<option value="-">Chưa rõ</option>` : "");
+  function buildRegions() {
+    ["mien", "vung"].forEach((dim) => {
+      const m = WM_IN_PROV[dim] = new Map();
+      S.wm.forEach((w) => { if (w[dim] === "-") return; const k = provKey(w.tinh); if (!m.has(k)) m.set(k, []); m.get(k).push(w); });
+      S.all.forEach((b) => (b[dim] = regionAt(b, dim)));
+    });
+    const rows = S.wm.concat(S.all);
+    $("#mien").innerHTML = $("#c-mien").innerHTML = regionOpts(S.wm, rows, "mien");
+    $("#c-vung").innerHTML = regionOpts(S.wm, rows, "vung");
+  }
+  // Ô Vùng chỉ liệt kê các vùng thuộc Miền đang chọn; vùng đang chọn không còn trong miền thì bỏ.
+  function fillVung() {
+    const inM = (x) => !S.mien || x.mien === S.mien, el = $("#vung");
+    el.innerHTML = regionOpts(S.wm.filter(inM), S.wm.concat(S.all).filter(inM), "vung");
+    if (![...el.options].some((o) => o.value === S.vung)) S.vung = "";
+    el.value = S.vung;
+  }
+  const regionName = () => [S.mien, S.vung].filter(Boolean).map((v) => (v === "-" ? "nơi chưa rõ vùng, miền" : v)).join(" · ");
+  const inVung = (x) => (!S.mien || x.mien === S.mien) && (!S.vung || x.vung === S.vung);
+  // Các tỉnh còn lại sau khi lọc Miền/Vùng
+  const provsInRegion = () => new Set(S.wm.concat(S.all).filter(inVung).map((x) => provKey(x.tinh)));
+  const inProv = (x) => inVung(x) && (!S.tinh || provKey(x.tinh) === S.tinh);
   const wmAttrOk = (w) => (!S.chuoi || w.chuoi === S.chuoi) && (!S.khu || (S.khu === "-" ? !w.khu_vuc : w.khu_vuc === S.khu));
   const pressOk = (w) => !S.chuoi || w.chuoi === S.chuoi;   // Pressure lọc theo chuỗi, bỏ qua Khu vực
   const scopeIdx = () => S.wm.map((_, i) => i).filter((i) => wmAttrOk(S.wm[i]) && inProv(S.wm[i]));
@@ -66,12 +79,11 @@
   function bhxNearest() {
     const key = S.chuoi + "|" + S.khu;
     if (nearB && nearBKey === key) return nearB;
-    const rad = Math.PI / 180, W = S.wm.map((w, i) => i).filter((i) => wmAttrOk(S.wm[i]));
-    const wLa = W.map((i) => S.wm[i].lat * rad), wLo = W.map((i) => S.wm[i].lng * rad), wC = wLa.map(Math.cos);
+    const W = S.wm.map((w, i) => i).filter((i) => wmAttrOk(S.wm[i])), grid = Nearby.index(W.map((i) => S.wm[i]));
     const d = new Float64Array(S.bhx.length).fill(Infinity), ix = new Int32Array(S.bhx.length).fill(-1);
     S.bhx.forEach((b, j) => {
-      const la = b.lat * rad, lo = b.lng * rad, c = Math.cos(la);
-      for (let k = 0; k < W.length; k++) { const x = haversine(la, lo, c, wLa[k], wLo[k], wC[k]); if (x < d[j]) { d[j] = x; ix[j] = W[k]; } }
+      const best = Nearby.search(grid, b.lat, b.lng, 1, 0)[0];
+      if (best) { d[j] = best[1]; ix[j] = W[best[0]]; }
     });
     nearBKey = key; return (nearB = { d, ix });
   }
@@ -82,11 +94,14 @@
     return cnt;
   }
   let CNT_B = null;
+  // Mở trong tab mới; web không gọi Google cho tới khi người dùng bấm. Không ghi đường dẫn trang này vào Referer.
+  const gmapLinks = (s) => `<div class="gmap-links"><a href="https://www.google.com/maps/search/?api=1&query=${s.lat}%2C${s.lng}" target="_blank" rel="noopener noreferrer">Xem trên Google Maps</a>`
+    + `<a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${s.lat}%2C${s.lng}" target="_blank" rel="noopener noreferrer">Street View</a></div>`;
   function bhxInfo(j) {
     const b = S.bhx[j], nb = bhxNearest(), w = nb.ix[j] >= 0 ? S.wm[nb.ix[j]] : null;
     return `<b>${esc(chainName(b.chain))} ${esc(b.ten || b.ma)}</b><br>${esc(b.dia_chi)}<br><span class="muted">${esc(b.tinh)}</span><hr>`
       + `WM trong ${fmt(S.R, S.R % 1 ? 1 : 0)} km: <b>${CNT_B ? CNT_B[j] : 0}</b><br>`
-      + (w ? `WM gần nhất: <b>${esc(w.ma)}</b> (${esc(w.chuoi)}) · ${fmt(nb.d[j], 2)} km` : "Chưa có WM trong bộ lọc");
+      + (w ? `WM gần nhất: <b>${esc(w.ma)}</b> (${esc(w.chuoi)}) · ${fmt(nb.d[j], 2)} km` : "Chưa có WM trong bộ lọc") + gmapLinks(b);
   }
   function wmInfo(i) {
     const w = S.wm[i];
@@ -129,8 +144,8 @@
     noteLayer.clearLayers();
     if (!showNotes) return;
     const nBhx = new Map(), nWm = new Map(), inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
-    S.bhx.forEach((b) => inc(nBhx, provKey(b.tinh)));
-    S.wm.filter(pressOk).forEach((w) => inc(nWm, provKey(w.tinh)));
+    S.bhx.filter(inVung).forEach((b) => inc(nBhx, provKey(b.tinh)));
+    S.wm.filter((w) => pressOk(w) && inVung(w)).forEach((w) => inc(nWm, provKey(w.tinh)));
     const by = new Map();
     scope.forEach((i) => {
       const w = S.wm[i], k = provKey(w.tinh);
@@ -161,7 +176,7 @@
   // withComp: vừa cả đối thủ đang bật — dùng khi đổi nút lọc, vì chuỗi mới bật có thể nằm ngoài khung đang xem.
   function fitScope(withComp) {
     let pts = scopeIdx().map((i) => S.wm[i]);
-    if (S.tinh || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
+    if (S.tinh || S.mien || S.vung || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
     if (pts.length) map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [20, 20], maxZoom: 14 });
   }
   // Danh sách tỉnh: hợp các tỉnh có WM hoặc có đối thủ (mọi chuỗi, kể cả chuỗi đang tắt).
@@ -174,7 +189,16 @@
     PROVS = [...P].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }
   const provName = (k) => (PROVS.find((p) => p.key === k) || {}).name || "";
-  function setProv(k) { S.tinh = k; S.sel = null; $("#tinh-q").value = provName(k); renderOverview(); fitScope(); }
+  function clearRegion() { S.mien = S.vung = ""; $("#mien").value = ""; fillVung(); }
+  function regionChanged() {
+    S.sel = null; fillVung();
+    if (S.tinh && !provsInRegion().has(S.tinh)) { S.tinh = ""; $("#tinh-q").value = ""; }   // tỉnh đang chọn không thuộc miền/vùng mới
+    renderOverview(); fitScope();
+  }
+  function setProv(k) {
+    if (k && !provsInRegion().has(k)) clearRegion();   // chọn tỉnh ngoài vùng (bấm ghi chú, tìm cửa hàng) → bỏ lọc vùng
+    S.tinh = k; S.sel = null; $("#tinh-q").value = provName(k); renderOverview(); fitScope();
+  }
   function buildWmMarkers() {                         // gọi lại mỗi khi danh sách WM+ đổi (upload)
     wmMarkers.forEach((mk) => mk.remove());
     wmMarkers = S.wm.map((w, i) => L.circleMarker([w.lat, w.lng], { radius: 5, weight: w.chuoi === "WMT" ? 2.5 : 1, color: w.chuoi === "WMT" ? getVar("--wmt") : "#fff", fillOpacity: 0.9 })
@@ -219,7 +243,7 @@
     $("#k-nbhx").textContent = fmt(bScope.length);
     const byComp = {}; bScope.forEach((j) => { const c = S.bhx[j].chain; byComp[c] = (byComp[c] || 0) + 1; });
     $("#k-nbhx-sub").textContent = (S.chains.size > 1 ? Object.entries(byComp).map(([c, k]) => `${chainName(c)} ${fmt(k)}`).join(" · ") + " · " : "")
-      + (S.tinh ? `trong ${provName(S.tinh)}` : "cả nước, đang mở");
+      + (S.tinh ? `trong ${provName(S.tinh)}` : regionName() ? `trong ${regionName()}` : "cả nước, đang mở");
     // Pressure = số đối thủ ÷ số WM, theo tỉnh và chuỗi; bỏ qua Khu vực vì đối thủ không có Urban/Rural. Không phụ thuộc R.
     const nPress = S.wm.filter((w) => inProv(w) && pressOk(w)).length;
     $("#k-press").textContent = nPress ? pct(bScope.length / nPress) : "–";
@@ -230,9 +254,9 @@
     $("#k-avg").textContent = scope.length ? fmt(tot / scope.length, 2) : "–";
     $("#k-med").textContent = isNaN(med) ? "–" : fmt(med, 2) + " km";
 
-    // Thanh % theo tỉnh (theo Chuỗi/Khu vực, luôn hiện đủ tỉnh để so sánh)
+    // Thanh % theo tỉnh (theo Miền/Vùng/Chuỗi/Khu vực, hiện đủ tỉnh trong vùng để so sánh)
     const by = {};
-    S.wm.forEach((w, i) => { if (!wmAttrOk(w)) return; (by[w.tinh] ||= [0, 0]); by[w.tinh][1]++; if (S.near[i] <= R) by[w.tinh][0]++; });
+    S.wm.forEach((w, i) => { if (!wmAttrOk(w) || !inVung(w)) return; (by[w.tinh] ||= [0, 0]); by[w.tinh][1]++; if (S.near[i] <= R) by[w.tinh][0]++; });
     $("#bars").innerHTML = Object.entries(by).sort((a, b) => b[1][0] / b[1][1] - a[1][0] / a[1][1]).map(([t, [c, n]]) =>
       `<div class="bar-row${provKey(t) === S.tinh ? " sel" : ""}" data-t="${esc(provKey(t))}" title="${c}/${n} WM"><span class="bar-name">${esc(t)}</span>
        <div class="bar-track"><div class="bar-fill" style="width:${(c / n) * 100}%"></div></div><span class="bar-val">${pct(c / n)}</span></div>`).join("")
@@ -251,16 +275,25 @@
       return { i, w, ma: w.ma, ten: w.ten, chuoi: w.chuoi, khu_vuc: w.khu_vuc, tinh: w.tinh, n, near: S.near[i], pct: Math.min(n, N) / N, top: S.topBy[i].slice(0, N), nChains: chains.size };
     });
   }
+  const WM_PAGE = 100;
+  let wmPage = 0, wmPageKey = "", wmJump = false;
   const activeChains = () => new Set(S.bhx.map((b) => b.chain)).size;
   const storeShort = (b) => `${chainName(b.chain)} ${b.ten || b.ma}`;
   function renderWmTable(scope) {
     const rows = wmRows(scope).sort((a, b) => (a[S.sortK] > b[S.sortK] ? 1 : a[S.sortK] < b[S.sortK] ? -1 : 0) * S.sortDir), N = topN(), L = esc(lab());
-    // Quá nhiều ô thì trình duyệt treo: chỉ vẽ phần đầu, file Xuất WM vẫn đủ.
-    const maxRows = Math.floor(TABLE_CELLS / (9 + N)), shown = rows.slice(0, maxRows), totalChains = activeChains();
+    // Chia trang cho trình duyệt đỡ nặng (bớt dòng nếu N rất lớn), file Xuất WM vẫn đủ.
+    const size = Math.max(1, Math.min(WM_PAGE, Math.floor(TABLE_CELLS / (9 + N)))), pages = Math.max(1, Math.ceil(rows.length / size)), totalChains = activeChains();
+    const key = [S.mien, S.vung, S.tinh, S.chuoi, S.khu, S.q, S.sortK, S.sortDir].join("|");
+    if (key !== wmPageKey) { wmPageKey = key; wmPage = 0; }                 // đổi lọc hoặc sắp xếp → về trang đầu
+    if (wmJump) { wmJump = false; const at = rows.findIndex((r) => r.i === S.sel); if (at >= 0) wmPage = Math.floor(at / size); }   // chọn WM trên bản đồ → tới trang có dòng đó
+    wmPage = Math.min(wmPage, pages - 1);
+    const shown = rows.slice(wmPage * size, (wmPage + 1) * size);
+    $("#wm-pager").innerHTML = pages < 2 ? "" : `<span class="muted">Dòng ${fmt(wmPage * size + 1)}–${fmt(wmPage * size + shown.length)} / ${fmt(rows.length)}</span>`
+      + `<button class="link" data-p="${wmPage - 1}"${wmPage ? "" : " disabled"}>‹ Trước</button><span>Trang ${fmt(wmPage + 1)} / ${fmt(pages)}</span><button class="link" data-p="${wmPage + 1}"${wmPage < pages - 1 ? "" : " disabled"}>Sau ›</button>`;
     $("#wm-count").textContent = `(${fmt(rows.length)})`;
     $("#wm-hint").innerHTML = S.sel != null
       ? `Đang xem WM <b>${esc(S.wm[S.sel].ma)}</b> trên bản đồ · <button class="link" id="clear-sel">bỏ chọn</button>`
-      : `Bấm 1 dòng để xem cửa hàng đó trên bản đồ. Khoảng cách tô đậm: đối thủ nằm trong bán kính ${fmt(S.R, S.R % 1 ? 1 : 0)} km. Cột % = trong ${fmt(N)} đối thủ gần nhất, bao nhiêu % nằm trong bán kính.${rows.length > maxRows ? ` <b>Bảng chỉ hiện ${fmt(maxRows)} dòng đầu cho đỡ nặng; bấm Xuất WM để lấy đủ ${fmt(rows.length)} dòng.</b>` : ""}`;
+      : `Bấm 1 dòng để xem cửa hàng đó trên bản đồ. Khoảng cách tô đậm: đối thủ nằm trong bán kính ${fmt(S.R, S.R % 1 ? 1 : 0)} km. Cột % = trong ${fmt(N)} đối thủ gần nhất, bao nhiêu % nằm trong bán kính.${pages > 1 ? ` Bảng chia trang; bấm Xuất WM để lấy đủ ${fmt(rows.length)} dòng.` : ""}`;
     $("#t-wm thead").innerHTML = `<tr><th data-k="ma">Mã CH</th><th data-k="ten">Tên CH</th><th data-k="chuoi">Chuỗi</th><th data-k="khu_vuc">Khu vực</th><th>Địa chỉ</th><th data-k="tinh">Tỉnh</th>`
       + `<th data-k="n" class="num">${L} trong R</th><th data-k="pct">% top ${fmt(N)} trong R</th><th data-k="nChains" class="num" title="Trong các chuỗi đối thủ đang bật, bao nhiêu chuỗi có cửa hàng trong bán kính R">Số chuỗi trong R</th>`
       + Array.from({ length: N }, (_, k) => `<th${k ? "" : ' data-k="near"'}>${L} #${k + 1}</th>`).join("") + `</tr>`;
@@ -282,7 +315,7 @@
     });
   }
   function select(i) {
-    S.sel = S.sel === i ? null : i;
+    S.sel = S.sel === i ? null : i; wmJump = S.sel != null;
     if (S.sel != null) map.setView([S.wm[i].lat, S.wm[i].lng], Math.max(map.getZoom(), 13));
     renderOverview();
   }
@@ -301,7 +334,7 @@
     const el = $("#area-panel"), i = S.sel, ticket = ++areaTicket;
     if (i == null) { el.hidden = true; return; }
     const w = S.wm[i], R = S.R, Rt = fmt(R, R % 1 ? 1 : 0);
-    const head = `<div class="area-head"><div><b>${esc(w.chuoi)} ${esc(w.ma)}</b><br><span class="muted">Khu vực trong bán kính ${Rt} km</span></div><button class="link" id="area-close" title="Đóng">✕</button></div>`;
+    const head = `<div class="area-head"><div><b>${esc(w.chuoi)} ${esc(w.ma)}</b><br><span class="muted">Khu vực trong bán kính ${Rt} km</span>${gmapLinks(w)}</div><button class="link" id="area-close" title="Đóng">✕</button></div>`;
     el.hidden = false;
     if (!window.POP_GRID || !window.POI_DATA) el.innerHTML = head + `<p class="muted">Đang tải dữ liệu khu vực…</p>`;
     try { await AreaInfo.load(); } catch (err) { if (ticket === areaTicket) el.innerHTML = head + `<p class="err">${esc(err.message)}</p>`; return; }
@@ -329,10 +362,11 @@
   function focusStore(kind, k) {
     const s = kind === "wm" ? S.wm[k] : S.bhx[k];
     if (kind === "wm" && !wmAttrOk(s)) { S.chuoi = S.khu = ""; $("#chuoi").value = $("#khu").value = ""; }
+    if (!inVung(s)) clearRegion();
     if (!inProv(s)) setProv(provKey(s.tinh));
     if (kind === "wm") { S.sel = null; select(k); }
     map.setView([s.lat, s.lng], 16);
-    L.popup().setLatLng([s.lat, s.lng]).setContent(kind === "wm" ? wmInfo(k) : bhxInfo(k)).openOn(map);
+    L.popup().setLatLng([s.lat, s.lng]).setContent(kind === "wm" ? wmInfo(k) + gmapLinks(s) : bhxInfo(k)).openOn(map);
     $("#map-card").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -367,11 +401,12 @@
   }
   combo($("#tinh-q"), $("#tinh-list"), (q) => {
     const cW = {}, cB = {};
-    S.wm.forEach((w) => { if (wmAttrOk(w)) { const k = provKey(w.tinh); cW[k] = (cW[k] || 0) + 1; } });
-    S.bhx.forEach((b) => { const k = provKey(b.tinh); cB[k] = (cB[k] || 0) + 1; });
+    S.wm.forEach((w) => { if (wmAttrOk(w) && inVung(w)) { const k = provKey(w.tinh); cW[k] = (cW[k] || 0) + 1; } });
+    S.bhx.forEach((b) => { if (inVung(b)) { const k = provKey(b.tinh); cB[k] = (cB[k] || 0) + 1; } });
     const cLab = lab();
-    const all = { html: `<b>Tất cả</b><small>${fmt(PROVS.length)} tỉnh</small>`, pick: () => setProv("") };
-    return (q ? [] : [all]).concat(PROVS.filter((p) => !q || plain(p.name).includes(q) || p.key.includes(q.replace(/[^a-z0-9]/g, "")))
+    const keep = provsInRegion(), inV = PROVS.filter((p) => keep.has(p.key));
+    const all = { html: `<b>Tất cả</b><small>${fmt(inV.length)} tỉnh</small>`, pick: () => setProv("") };
+    return (q ? [] : [all]).concat(inV.filter((p) => !q || plain(p.name).includes(q) || p.key.includes(q.replace(/[^a-z0-9]/g, "")))
       .map((p) => ({ html: `${esc(p.name)}<small>${fmt(cW[p.key] || 0)} WM · ${fmt(cB[p.key] || 0)} ${esc(cLab)}</small>`, pick: () => setProv(p.key) })));
   }, { showAllOnFocus: true, onBlur: () => ($("#tinh-q").value = provName(S.tinh)) });
   combo($("#q"), $("#q-list"), (q) => {
@@ -391,17 +426,15 @@
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
-  const fileTag = () => [S.chains.size === 1 ? [...S.chains][0].toLowerCase() : "nhieu_chuoi", S.tinh || "tat_ca_tinh", S.chuoi && S.chuoi.replace("+", "plus"), S.khu && (S.khu === "-" ? "chua_phan_loai" : S.khu)].filter(Boolean).join("_") + `_R${S.R}km`;
+  const fileTag = () => [S.chains.size === 1 ? [...S.chains][0].toLowerCase() : "nhieu_chuoi", ...[S.mien, S.vung].filter(Boolean).map((v) => (v === "-" ? "chua_ro" : plain(v).replace(/[^a-z0-9]+/g, "_"))), S.tinh || (S.mien || S.vung ? "" : "tat_ca_tinh"), S.chuoi && S.chuoi.replace("+", "plus"), S.khu && (S.khu === "-" ? "chua_phan_loai" : S.khu)].filter(Boolean).join("_") + `_R${S.R}km`;
 
   // ---------- Thay đổi BHX ----------
   let CH = [];
-  async function loadChanges() {
-    const rad = Math.PI / 180;
-    CH = (await API.getChanges()).map((e) => {
-      const la = e.lat * rad, lo = e.lng * rad, c = Math.cos(la);
-      let n2 = 0, best = Infinity;
-      S.wm.forEach((w) => { const d = haversine(la, lo, c, w.lat * rad, w.lng * rad, Math.cos(w.lat * rad)); if (d <= 2) n2++; if (d < best) best = d; });
-      return { ...e, chain: e.chain || "BHX", n2, near: best };
+  async function loadChanges(pre) {
+    const grid = Nearby.index(S.wm);
+    CH = (pre || await API.getChanges()).map((e) => {
+      const list = Nearby.search(grid, e.lat, e.lng, 1, 2), n2 = list.filter((x) => x[1] <= 2).length, best = list.length ? list[0][1] : Infinity;
+      return { ...e, chain: e.chain || "BHX", n2, near: best, mien: regionAt(e, "mien"), vung: regionAt(e, "vung") };
     });
     const ts = [...new Set(CH.map((e) => e.tinh))].sort();
     $("#c-tinh").innerHTML = `<option value="">Tất cả</option>` + ts.map((t) => `<option>${esc(t)}</option>`).join("");
@@ -410,8 +443,8 @@
   }
   const TYPE = { open: "Mở mới", close: "Đóng cửa", move: "Dời vị trí" };
   function changeRows() {
-    const t = $("#c-type").value, f = $("#c-from").value, p = $("#c-tinh").value, c = $("#c-chain").value;
-    return CH.filter((e) => (!t || e.type === t) && (!f || e.date >= f) && (!p || e.tinh === p) && (!c || e.chain === c));
+    const t = $("#c-type").value, f = $("#c-from").value, p = $("#c-tinh").value, c = $("#c-chain").value, v = $("#c-vung").value, m = $("#c-mien").value;
+    return CH.filter((e) => (!t || e.type === t) && (!f || e.date >= f) && (!p || e.tinh === p) && (!c || e.chain === c) && (!v || e.vung === v) && (!m || e.mien === m));
   }
   function renderChanges() {
     const rows = changeRows(), cnt = { open: 0, close: 0, move: 0 };
@@ -444,6 +477,15 @@
     document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== "view-" + view));
     document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
     if (view === "overview") setTimeout(() => map.invalidateSize(), 0);
+    if (view === "wm") { WMUpload.ensureLib().catch(() => {}); openOnce("wm", () => [renderVersions()]); }
+    if (view === "admin") openOnce("admin", () => [renderUsers(), renderLog()]);
+  }
+  // Tab của Admin chỉ tải khi mở lần đầu; lỗi thì lần mở sau thử lại.
+  const opened = {};
+  function openOnce(tab, load) {
+    if (opened[tab]) return;
+    opened[tab] = true;
+    Promise.all(load()).catch(() => { opened[tab] = false; });
   }
   async function start(user) {
     S.user = user;
@@ -452,16 +494,17 @@
     $("#user-email").textContent = user.email;
     $("#user-role").textContent = user.role === "admin" ? "Admin" : "Viewer";
     document.querySelectorAll("[data-admin]").forEach((b) => (b.hidden = user.role !== "admin"));
-    await applySettings();
+    const boot = await API.getBoot();
+    applySettings(boot.settings);
     initMap();
-    await loadData();
-    if (user.role === "admin") { renderVersions(); renderUsers(); renderLog(); }
+    await loadData(boot.snapshot, boot.changes);
   }
-  async function loadData() {
-    const snap = await API.getSnapshot();
-    S.wm = snap.wm.map((w) => ({ ...w, chuoi: w.chuoi || "WM+", khu_vuc: w.khu_vuc || "", dia_chi: w.dia_chi || "" }));
+  async function loadData(preSnap, preChanges) {
+    const snap = preSnap || await API.getSnapshot();
+    S.wm = snap.wm.map((w) => ({ ...w, chuoi: w.chuoi || "WM+", khu_vuc: w.khu_vuc || "", dia_chi: w.dia_chi || "", vung: w.vung || "-", mien: w.mien || "-" }));
     S.all = snap.bhx.map((b) => ({ ...b, chain: "BHX" })).concat(snap.comp || []);
-    S.bhx = S.all.filter((b) => S.chains.has(b.chain)); S.sel = null; S.tinh = ""; $("#tinh-q").value = "";
+    buildRegions();
+    S.bhx = S.all.filter((b) => S.chains.has(b.chain)); S.sel = null; S.tinh = ""; $("#tinh-q").value = ""; clearRegion();
     try { S.compStatus = JSON.parse(snap.compStatus || "{}"); } catch (_) { S.compStatus = {}; }
     const left = snap.wmExpires ? (snap.wmExpires - Date.now()) / 3600e3 : 0;
     $("#snap-info").textContent = `${fmt(S.wm.length)} WM (${snap.wmVersion}`
@@ -471,7 +514,7 @@
     computeAll(); fillProvinces();
     buildBhxAll(); buildWmMarkers(); renderOverview(); fitScope();
     if (!S.wm.length && !S.all.length) $("#snap-info").textContent = "Chưa có dữ liệu WM+ (chưa upload hoặc đã tự xoá sau 48 giờ) — Admin vào tab WM+ (upload) để tải file lên.";
-    loadChanges();
+    loadChanges(preChanges);
   }
 
   // ---------- Upload WM+ ----------
@@ -492,14 +535,17 @@
     $("#up-map").innerHTML = `Tiêu đề ở dòng ${p.headerRow}. Cột dùng: ` + Object.entries(p.mapping).map(([k, ix]) => `<b>${k}</b> = <code>${esc(p.header[ix])}</code>`).join(" · ")
       + (p.mapping.ten === undefined ? ` · <span class="muted">không có cột Tên → dùng Mã làm Tên</span>` : "")
       + (p.mapping.chuoi === undefined ? ` · <span class="muted">không có cột Chuỗi → tất cả là ${esc($("#up-chuoi").value)}</span>` : "")
-      + (p.mapping.khu_vuc === undefined ? ` · <span class="muted">không có cột Khu vực → để trống</span>` : "");
+      + (p.mapping.khu_vuc === undefined ? ` · <span class="muted">không có cột Khu vực → để trống</span>` : "")
+      + (p.mapping.mien === undefined ? ` · <span class="err">không có cột Miền → không lọc được theo miền</span>` : "")
+      + (p.mapping.vung === undefined ? ` · <span class="err">không có cột Vùng → không lọc được theo vùng</span>` : "");
     const v = WMUpload.validate(p, $("#up-chuoi").value), d = WMUpload.diff(S.wm, v.ok);
     UP.valid = v.ok; UP.diff = d;
     const cnt = (f) => v.ok.filter(f).length;
     $("#up-kpis").innerHTML = [["Dòng hợp lệ", v.ok.length], ["Dòng lỗi (không đưa lên)", v.bad.length], ["Trùng mã", v.dups.length],
       ["Thêm mới", d.added.length], ["Không còn trong file", d.removed.length], ["Dời > 50 m", d.moved.length]]
       .map(([k, n]) => `<div class="card kpi"><span>${k}</span><b>${fmt(n)}</b></div>`).join("")
-      + `<p class="small muted" style="grid-column:1/-1;margin:0">WM+ ${fmt(cnt((r) => r.chuoi === "WM+"))} · WMT ${fmt(cnt((r) => r.chuoi === "WMT"))} · Urban ${fmt(cnt((r) => r.khu_vuc === "Urban"))} · Rural ${fmt(cnt((r) => r.khu_vuc === "Rural"))} · chưa phân loại ${fmt(cnt((r) => !r.khu_vuc))}</p>`;
+      + `<p class="small muted" style="grid-column:1/-1;margin:0">WM+ ${fmt(cnt((r) => r.chuoi === "WM+"))} · WMT ${fmt(cnt((r) => r.chuoi === "WMT"))} · Urban ${fmt(cnt((r) => r.khu_vuc === "Urban"))} · Rural ${fmt(cnt((r) => r.khu_vuc === "Rural"))} · chưa phân loại ${fmt(cnt((r) => !r.khu_vuc))}`
+      + [["mien", "Miền"], ["vung", "Vùng"]].map(([k, label]) => `<br>${label}: ${[...new Set(v.ok.map((r) => r[k]))].sort((a, b) => a.localeCompare(b, "vi", { numeric: true })).map((g) => `${esc(g || "để trống")} ${fmt(cnt((r) => r[k] === g))}`).join(" · ")}`).join("") + `</p>`;
     $("#up-issues").innerHTML =
       listTable("Dòng lỗi — sẽ KHÔNG được đưa lên", v.bad, [["Dòng Excel", (r) => r.line], ["Mã", (r) => r.ma], ["Lý do", (r) => r.why], ["Lat", (r) => r.lat], ["Lng", (r) => r.lng]])
       + listTable("Trùng mã — phải sửa file trước khi áp dụng", v.dups, [["Dòng Excel", (r) => r.line], ["Mã", (r) => r.ma], ["Tỉnh", (r) => r.tinh], ["Lat", (r) => r.lat], ["Lng", (r) => r.lng]]);
@@ -513,6 +559,7 @@
   $("#up-file").addEventListener("change", async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try {
+      await WMUpload.ensureLib();
       UP = { wb: WMUpload.readWorkbook(await f.arrayBuffer()) };
       $("#up-sheet").innerHTML = UP.wb.SheetNames.map((n) => `<option>${esc(n)}</option>`).join("");
       $("#up-sheet").disabled = UP.wb.SheetNames.length < 2;
@@ -529,7 +576,7 @@
     if (!confirm(`Lưu ${fmt(n)} WM thành phiên bản mới (thay toàn bộ danh sách cũ)?\nThêm ${d.added.length} · bỏ ${d.removed.length} · dời ${d.moved.length}.\nDữ liệu tự xoá sau 48 giờ.`)) return;
     $("#up-apply").disabled = true; $("#up-msg").textContent = "Đang lưu…";
     try {
-      const r = await API.publishWm(UP.valid.map(({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi }) => ({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi })));
+      const r = await API.publishWm(UP.valid.map(({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi, vung, mien }) => ({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi, vung, mien })));
       $("#up-msg").textContent = `Đã lưu ${r.version}: ${fmt(r.rows)} WM.`;
       UP = null; $("#up-file").value = "";
       await loadData(); renderVersions();
@@ -537,8 +584,7 @@
   });
 
   // Quyền xuất CSV: Admin luôn được; Viewer theo cài đặt. Chỉ là ẩn nút — Viewer vẫn xem được dữ liệu trên màn hình.
-  async function applySettings() {
-    const st = await API.getSettings();
+  function applySettings(st) {
     const viewerExport = st.viewer_can_export !== false;
     const can = S.user.role === "admin" || viewerExport;
     document.querySelectorAll("#exp-wm, #exp-bhx, #exp-changes").forEach((b) => (b.hidden = !can));
@@ -599,6 +645,8 @@
     else S.chains.add(b.dataset.c);
     applyChains(); fitScope(true);
   });
+  $("#mien").addEventListener("change", (e) => { S.mien = e.target.value; regionChanged(); });
+  $("#vung").addEventListener("change", (e) => { S.vung = e.target.value; regionChanged(); });
   $("#chuoi").addEventListener("change", (e) => { S.chuoi = e.target.value; S.sel = null; renderOverview(); fitScope(); });
   $("#khu").addEventListener("change", (e) => { S.khu = e.target.value; S.sel = null; renderOverview(); fitScope(); });
   $("#q").addEventListener("input", (e) => { S.q = plain(e.target.value.trim()); renderWmTable(scopeIdx()); $("#bhx-count").textContent = `(${fmt(bhxRows().length)})`; });
@@ -629,6 +677,11 @@
     if (th) { S.sortDir = S.sortK === th.dataset.k ? -S.sortDir : (["n", "pct", "nChains"].includes(th.dataset.k) ? -1 : 1); S.sortK = th.dataset.k; renderWmTable(scopeIdx()); return; }
     const tr = e.target.closest("tr[data-i]"); if (tr) select(+tr.dataset.i);
   });
+  $("#wm-pager").addEventListener("click", (e) => {
+    if (!e.target.dataset.p) return;
+    wmPage = Math.max(0, +e.target.dataset.p); renderWmTable(scopeIdx());
+    $("#t-wm").closest(".table-wrap").scrollTop = 0;
+  });
   $("#wm-hint").addEventListener("click", (e) => { if (e.target.id === "clear-sel") select(S.sel); });
   // Mỗi WM 1 dòng, khối đối thủ #1..#N theo template MASTER (Code / Address / Distance).
   $("#exp-wm").addEventListener("click", () => {
@@ -640,7 +693,7 @@
   });
   $("#exp-bhx").addEventListener("click", () => downloadCsv(`doithu_${fileTag()}.csv`, ["Đối thủ", "Mã", "Tên", "Địa chỉ", "Tỉnh", "Lat", "Lng", "Bán kính (km)", "Số WM trong R", "WM gần nhất", "Chuỗi WM gần nhất", "Khoảng cách WM gần nhất (km)"],
     bhxRows().map((r) => [chainName(r.b.chain), r.b.ma, r.b.ten || "", r.b.dia_chi, r.b.tinh, r.b.lat, r.b.lng, S.R, r.n, r.w ? r.w.ma : "", r.w ? r.w.chuoi : "", r.d ?? ""])));
-  ["#c-chain", "#c-type", "#c-from", "#c-tinh"].forEach((s) => $(s).addEventListener("input", renderChanges));
+  ["#c-chain", "#c-type", "#c-from", "#c-mien", "#c-vung", "#c-tinh"].forEach((s) => $(s).addEventListener("input", renderChanges));
   $("#exp-changes").addEventListener("click", () => downloadCsv("bhx_thay_doi.csv", ["Ngày", "Đối thủ", "Loại", "Mã", "Địa chỉ", "Tỉnh", "WM+ trong 2 km", "WM+ gần nhất (km)", "Lat", "Lng"],
     changeRows().map((e) => [e.date, chainName(e.chain), TYPE[e.type], e.ma, e.dia_chi, e.tinh, e.n2, e.near.toFixed(3), e.lat, e.lng])));
   $("#add-user").addEventListener("submit", async (e) => {
