@@ -24,7 +24,7 @@ const CFG = {
   PW_MAX_TRY: 5,             // nhập sai 5 lần → khoá email đó
   PW_LOCK_S: 900,            // khoá 15 phút
   PW_TEMP_DAYS: 7,           // mật khẩu tạm hết hạn sau 7 ngày
-  SESSION_DAYS: 30,         // phiên đăng nhập 30 ngày, tự gia hạn khi còn dùng (lưu ở Script Properties)
+  SESSION_DAYS: 7,          // đăng nhập 1 lần dùng đúng 7 ngày, không tự gia hạn (lưu ở Script Properties nên thay code không mất phiên)
   WM_TTL_H: 48,              // WM+ tự xoá sau 48 giờ
   MOVE_KM: 0.05,             // dời > 50 m mới tính là dời vị trí
   MAX_CLOSE_RATIO: 0.30,     // guard đồng bộ BHX
@@ -264,7 +264,7 @@ function session_(token) {
   }
   const role = roleOf_(s.e);
   if (!role) { props.deleteProperty('sess:' + h); throw err_('Quyền truy cập đã bị thu hồi', 'AUTH'); }
-  if (s.x - Date.now() < (CFG.SESSION_DAYS - 1) * 864e5) putSession_(h, s.e);   // gia hạn tối đa 1 lần/ngày
+  if (s.x - Date.now() > CFG.SESSION_DAYS * 864e5) putSession_(h, s.e);   // phiên cũ hạn 30 ngày: rút về 7 ngày, không bắt đăng nhập lại
   return { email: s.e, role: role };
 }
 
