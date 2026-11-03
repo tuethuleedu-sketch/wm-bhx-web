@@ -717,5 +717,8 @@
   });
 
   // Còn phiên đăng nhập (trong cùng tab) → vào thẳng
-  API.currentUser().then((u) => u && start(u)).catch((err) => ($("#login-msg").textContent = err.message));
+  $("#login-retry-btn").addEventListener("click", () => location.reload());
+  API.currentUser().then((u) => u && start(u)).catch((err) => {
+    $("#login-form").hidden = true; $("#login-retry").hidden = false; $("#login-retry-msg").textContent = err.message;
+  });
 })();

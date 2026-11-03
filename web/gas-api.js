@@ -4,7 +4,7 @@
   const CFG = window.APP_CONFIG;
   if (CFG.mode !== "gas") return;
   const KEY = "wmbhx_token";
-  const store = {                                       // localStorage: nhớ đăng nhập trên máy này tới khi Đăng xuất / hết 30 ngày
+  const store = {                                       // localStorage: nhớ đăng nhập trên máy này tới khi Đăng xuất / hết 7 ngày
     get() { try { return localStorage.getItem(KEY) || sessionStorage.getItem(KEY); } catch (_) { return null; } },
     set(v) {
       try { sessionStorage.removeItem(KEY); v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (_) {}
@@ -24,7 +24,7 @@
     const j = await r.json();
     if (j.error) {
       if (j.code === "AUTH") { token = null; store.set(null); }
-      throw new Error(j.error);
+      throw Object.assign(new Error(j.error), { code: j.code });
     }
     return j.data;
   }
@@ -34,7 +34,9 @@
     async currentUser() {
       if (!token) return null;
       // Mở lại bằng phiên đã lưu: lấy luôn dữ liệu ban đầu trong cùng 1 lần gọi, getBoot dùng lại kết quả này.
-      try { boot = await call("boot", { resume: true }); return boot.me; } catch (_) { return null; }
+      // Chỉ phiên hết hạn mới về màn hình đăng nhập; máy chủ lỗi tạm thời thì báo lỗi, phiên vẫn giữ.
+      try { boot = await call("boot", { resume: true }); return boot.me; }
+      catch (err) { if (err.code === "AUTH") return null; throw err; }
     },
     async getBoot() {
       const b = boot || await call("boot");
