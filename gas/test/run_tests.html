@@ -167,9 +167,12 @@
   check("Drive API chưa bật → chuyển vào thùng rác + ghi chú cảnh báo", M.trashed.includes(v1file) && /thùng rác/.test(vs.data[1][11]));
   purgeExpiredWm();
   check("chạy job lần nữa: không xoá lại bản đã xoá", M.removed.length === 1);
-  r = call("publishWm", { token: admin.token, rows: W2.concat([{ ma: "T1", tinh: "T", lat: 20.7, lng: 106.1, chuoi: "WMT", khu_vuc: "Rural", dia_chi: "12 Lê Lợi" }]) });
+  r = call("publishWm", { token: admin.token, rows: W2.concat([{ ma: "T1", tinh: "T", lat: 20.7, lng: 106.1, chuoi: "WMT", khu_vuc: "Rural", dia_chi: "12 Lê Lợi", vung: "Vùng 2", mien: "Miền Bắc" }]) });
   const t1 = call("snapshot", { token: admin.token }).data.wm.find((w) => w.ma === "T1");
-  check("lưu & đọc lại Chuỗi/Khu vực/Địa chỉ", r.ok && t1 && t1.chuoi === "WMT" && t1.khu_vuc === "Rural" && t1.dia_chi === "12 Lê Lợi", t1);
+  check("lưu & đọc lại Chuỗi/Khu vực/Địa chỉ/Vùng/Miền", r.ok && t1 && t1.chuoi === "WMT" && t1.khu_vuc === "Rural" && t1.dia_chi === "12 Lê Lợi" && t1.vung === "Vùng 2" && t1.mien === "Miền Bắc", t1);
+  check("boot: chưa đăng nhập thì bị từ chối", call("boot").code === "AUTH");
+  r = call("boot", { token: admin.token });
+  check("boot: 1 lần gọi trả đủ người dùng, cài đặt, dữ liệu, thay đổi", r.ok && r.data.me.role === "admin" && r.data.settings.viewer_can_export !== undefined && r.data.snapshot.wm.some((w) => w.ma === "T1") && Array.isArray(r.data.changes), r);
 
   // ---- Đồng bộ BHX ----
   const snap = (...s) => s.map(([id, lat, lng]) => ({ store_id: id, dia_chi: "BHX " + id, province_id: 1000, tinh: "Hà Nội", lat, lng }));
