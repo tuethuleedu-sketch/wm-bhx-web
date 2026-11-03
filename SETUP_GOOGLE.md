@@ -105,7 +105,7 @@ SYNC_SECRET=chuỗi-64-ký-tự
 ## Vận hành & giới hạn cần biết
 - **WM+ tự xoá sau 48 giờ** tính từ lúc upload; muốn xem tiếp thì upload lại. BHX và lịch sử thay đổi BHX được giữ.
   Nếu `purge_note` ghi "chỉ chuyển vào thùng rác" → Drive API chưa bật: Apps Script → **Services (+) → Drive API → Add**, rồi tự xoá file trong Thùng rác Drive.
-- **Phiên đăng nhập 6 giờ**; đóng tab là phải nhập mã lại. Thu hồi quyền có hiệu lực ngay.
+- **Đăng nhập 1 lần dùng đúng 7 ngày** trên mỗi máy, đóng tab không mất. Thay `Code.gs` hay tạo Phiên bản mới **không** làm mất phiên và mật khẩu, nên không cần chạy lại `taoMatKhauAdmin`. Thu hồi quyền có hiệu lực ngay.
 - **Mật khẩu:** sai 5 lần thì email đó bị khoá 15 phút. Đồng nghiệp quên mật khẩu: Admin bấm "Cấp lại mật khẩu" trong tab Phân quyền. Admin quên mật khẩu: chạy `taoMatKhauAdmin` trong Apps Script.
 - **Sheet chính** (users, BHX, nhật ký) có lịch sử phiên bản của Google như mọi file Sheet. WM+ không nằm ở đây, nên không bị lưu lại trong lịch sử.
 - **Bạn là chủ Sheet** nên mở và sửa trực tiếp được mọi tab, kể cả nhật ký. "Không sửa được nhật ký" chỉ áp dụng với người dùng qua web.
