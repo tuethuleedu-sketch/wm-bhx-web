@@ -42,7 +42,7 @@ const TABS = {
   comp_changes: ['detected_on', 'chain', 'type', 'store_id', 'ten', 'dia_chi', 'tinh', 'lat', 'lng', 'old_lat', 'old_lng'],
   access_log:  ['at', 'email', 'event'],
 };
-const WM_COLS = ['ma', 'ten', 'tinh', 'lat', 'lng', 'khu_vuc', 'chuoi', 'dia_chi', 'vung', 'mien'];
+const WM_COLS = ['ma', 'ten', 'tinh', 'lat', 'lng', 'khu_vuc', 'chuoi', 'dia_chi', 'vung', 'mien', 'quan'];
 
 // ───────────────────────── HTTP ─────────────────────────
 function doGet() {
@@ -297,10 +297,10 @@ function liveVersion_() {
 }
 function readWmFile_(fileId) {
   const v = SpreadsheetApp.openById(fileId).getSheets()[0].getDataRange().getValues();
-  // File cũ ít cột hơn → khu_vuc/dia_chi/vung/mien rỗng, chuoi mặc định WM+
+  // File cũ ít cột hơn → khu_vuc/dia_chi/vung/mien/quan rỗng, chuoi mặc định WM+
   return v.slice(1).map(function (r) {
     return { ma: String(r[0]), ten: String(r[1] || r[0]), tinh: String(r[2]), lat: Number(r[3]), lng: Number(r[4]),
-      khu_vuc: String(r[5] || ''), chuoi: String(r[6] || 'WM+'), dia_chi: String(r[7] || ''), vung: String(r[8] || ''), mien: String(r[9] || '') };
+      khu_vuc: String(r[5] || ''), chuoi: String(r[6] || 'WM+'), dia_chi: String(r[7] || ''), vung: String(r[8] || ''), mien: String(r[9] || ''), quan: String(r[10] || '') };
   });
 }
 
@@ -374,7 +374,7 @@ function validateWm_(rows) {
     const chuoi = String(r.chuoi || 'WM+');
     if (chuoi !== 'WM+' && chuoi !== 'WMT') throw new Error('Mã ' + ma + ': chuỗi phải là WM+ hoặc WMT');
     return { ma: ma, ten: String(r.ten || ma).slice(0, 200), tinh: String(r.tinh || '').slice(0, 100), lat: lat, lng: lng,
-      khu_vuc: String(r.khu_vuc || '').slice(0, 30), chuoi: chuoi, dia_chi: String(r.dia_chi || '').slice(0, 300), vung: String(r.vung || '').slice(0, 50), mien: String(r.mien || '').slice(0, 50) };
+      khu_vuc: String(r.khu_vuc || '').slice(0, 30), chuoi: chuoi, dia_chi: String(r.dia_chi || '').slice(0, 300), vung: String(r.vung || '').slice(0, 50), mien: String(r.mien || '').slice(0, 50), quan: String(r.quan || '').slice(0, 50) };
   });
 }
 
@@ -386,7 +386,7 @@ function publishWm_(u, rowsRaw) {
     const version = 'v' + (all.length + 1);
     const ss = SpreadsheetApp.create('WM_upload_' + version + '_' + Utilities.formatDate(new Date(), CFG.TZ, 'yyyyMMdd_HHmm'));
     const sh = ss.getSheets()[0];
-    sh.getRange('A:J').setNumberFormat('@');
+    sh.getRange('A:K').setNumberFormat('@');
     sh.getRange(1, 1, rows.length + 1, WM_COLS.length).setValues([WM_COLS].concat(rows.map(function (r) { return WM_COLS.map(function (k) { return r[k]; }); })));
     DriveApp.getFileById(ss.getId()).moveTo(uploadFolder_());
 
