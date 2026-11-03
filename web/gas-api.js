@@ -34,12 +34,18 @@
       if (!token) return null;
       try { return await call("me"); } catch (_) { return null; }
     },
-    requestOtp: (email) => call("requestOtp", { email }),
-    async signIn(email, code) {
-      const d = await call("verifyOtp", { email, code });
+    async signIn(email, password) {
+      const d = await call("login", { email, password });
+      if (d.mustChange) return d;
       token = d.token; store.set(token);
       return { email: d.email, role: d.role };
     },
+    async changePassword(email, password, newPassword) {
+      const d = await call("changePassword", { email, password, newPassword });
+      token = d.token; store.set(token);
+      return { email: d.email, role: d.role };
+    },
+    resetPassword: (email) => call("resetPassword", { email }),
     async signOut() { try { await call("logout"); } finally { token = null; store.set(null); } },
     async getSnapshot() {
       const d = await call("snapshot");

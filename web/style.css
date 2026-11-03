@@ -25,6 +25,9 @@ label { display: inline-flex; flex-direction: column; gap: 4px; color: var(--mut
 .login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
 .login-card { width: min(380px, 100%); display: flex; flex-direction: column; gap: 12px; }
 .login-card label { font-size: 13px; } .login-card input { width: 100%; }
+.login-card[hidden] { display: none; }
+#pw-dialog { border: 0; width: min(380px, calc(100% - 32px)); }
+#pw-dialog::backdrop { background: rgba(0, 0, 0, .45); }
 
 .topbar { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .brand { font-size: 16px; }
@@ -37,7 +40,8 @@ main { padding: 16px; display: flex; flex-direction: column; gap: 14px; margin: 
 .view { display: flex; flex-direction: column; gap: 14px; }
 .view[hidden] { display: none; }
 .controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
-.chips-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; }
+.chips-box { display: flex; flex-direction: column; gap: 4px; }
+.chips-label { color: var(--muted); font-size: 12px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); color: var(--muted); border: 1px solid var(--line); border-radius: 16px; padding: 4px 12px; font-size: 13px; }
 .chip i { width: 10px; height: 10px; border-radius: 50%; opacity: .35; }
@@ -46,10 +50,22 @@ main { padding: 16px; display: flex; flex-direction: column; gap: 14px; margin: 
 .chip.on i { opacity: 1; }
 .chip:disabled { opacity: .5; cursor: not-allowed; }
 .chip.warn small { color: var(--close); }
+.wm-head { gap: 12px; flex-wrap: wrap; } .wm-head h3 { margin: 0; }
+.wm-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+label.inline { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+#t-wm th, #t-wm td { white-space: nowrap; }
+#t-wm th::first-letter { text-transform: uppercase; }
+#t-wm td.addr { white-space: normal; min-width: 220px; max-width: 320px; }
+#t-wm td.top small { color: var(--muted); }
+#t-wm td.top.out { color: var(--muted); }
+#t-wm td.top.in b { color: var(--wm-hit); }
+.pbar { display: grid; grid-template-columns: 90px 36px; gap: 6px; align-items: center; }
+.pbar-track { background: var(--bg); border-radius: 3px; height: 12px; overflow: hidden; }
+.pbar-fill { background: var(--wm-hit); height: 100%; }
+.pbar span { text-align: right; font-variant-numeric: tabular-nums; }
 i.lab { font-style: normal; }
 .kpi > span:first-child::first-letter { text-transform: uppercase; }
-.r-row { display: inline-flex; align-items: center; gap: 8px; color: var(--text); }
-#r { width: 200px; } #r-num { width: 72px; }
+#r-num { width: 90px; } #top-n { width: 76px; }
 #snap-info { margin-left: auto; }
 .combo { position: relative; } #tinh-q { width: 240px; } .combo.search input { width: 300px; }
 .combo-list { position: absolute; top: 100%; left: 0; z-index: 1000; min-width: 100%; width: max-content; max-width: 460px; max-height: 320px; overflow: auto;
@@ -60,7 +76,7 @@ i.lab { font-style: normal; }
 .combo-list .empty { color: var(--muted); cursor: default; }
 
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.kpis.six { grid-template-columns: repeat(6, 1fr); }
+.kpis.six { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .kpi.hl-wm { border-left: 4px solid var(--wm-hit); } .kpi.hl-bhx { border-left: 4px solid var(--bhx); }
 .grid2.even, #view-overview > .grid2.even { grid-template-columns: 1fr 1fr; }
 .kpi { display: flex; flex-direction: column; gap: 4px; }
@@ -71,7 +87,24 @@ i.lab { font-style: normal; }
 
 .map-card { padding: 0; overflow: hidden; display: flex; flex-direction: column; position: relative; }
 #map { height: calc(100vh - 150px); min-height: 520px; }
-.map-full { position: absolute; top: 10px; right: 10px; z-index: 500; background: var(--surface); color: var(--text); border: 1px solid var(--line); box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+.area-panel { position: absolute; top: 10px; left: 54px; z-index: 600; width: 340px; max-width: calc(100% - 70px); max-height: calc(100% - 70px); overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.2); padding: 10px 12px; font-size: 12px; }
+.area-panel h4 { margin: 10px 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.area-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; font-size: 13px; }
+.area-row { display: grid; grid-template-columns: 62px 1fr 38px; gap: 6px; align-items: center; margin: 3px 0; }
+.area-row span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.area-panel details { margin: 2px 0; border-bottom: 1px solid var(--line); padding: 3px 0; }
+.area-panel summary { font-weight: 400; padding: 0; }
+.area-panel summary b { float: right; }
+.area-panel summary small { display: block; color: var(--muted); margin-left: 12px; }
+.area-panel ul { margin: 3px 0 3px 12px; padding: 0 0 0 12px; color: var(--muted); }
+.area-unnamed { display: block; margin-left: 12px; }
+.area-src { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.map-tools { position: absolute; top: 10px; right: 10px; z-index: 500; display: flex; gap: 6px; }
+.leaflet-tooltip.prov-note { background: var(--surface); border: 1px solid var(--wm-hit); border-radius: 6px; padding: 2px 7px; font-size: 12px; line-height: 1.3; text-align: center; color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.25); cursor: pointer; }
+.leaflet-tooltip.prov-note::before { display: none; }
+.leaflet-tooltip.prov-note b { color: var(--wm-hit); }
+.leaflet-tooltip.prov-note small { color: var(--muted); font-size: 10px; }
+.map-full { background: var(--surface); color: var(--text); border: 1px solid var(--line); box-shadow: 0 1px 4px rgba(0,0,0,.2); }
 .map-card.map-max { position: fixed; inset: 0; z-index: 2000; border: 0; border-radius: 0; background: var(--surface); }
 .map-card.map-max #map { flex: 1; height: auto; min-height: 0; }
 .dot.ring-wmt { background: transparent; border: 2px solid var(--wmt); }

@@ -83,8 +83,10 @@
   window.DemoAPI = {
     mode: "demo",
     async currentUser() { return null; },
-    async requestOtp() {},
-    async signIn(email) { return { email, role: "admin" }; },
+    // Demo: mật khẩu bất kỳ; nhập "tam" để xem bước đặt mật khẩu mới.
+    async signIn(email, password) { return password === "tam" ? { mustChange: true, email } : { email, role: "admin" }; },
+    async changePassword(email) { return { email, role: "admin" }; },
+    async resetPassword() { return { tempPassword: "demo12345678" }; },
     async signOut() {},
     async getSettings() { return { ...settings }; },
     async setSetting(key, value) { settings[key] = value; },
@@ -97,6 +99,7 @@
         { at: at(0.1), email: "admin.demo@example.com", event: "login" },
         { at: at(2), email: "dongnghiep1.demo@example.com", event: "resume" },
         { at: at(3), email: "nguoila.demo@example.com", event: "denied" },
+        { at: at(4), email: "dongnghiep1.demo@example.com", event: "login_fail" },
         { at: at(5), email: "dongnghiep1.demo@example.com", event: "login" },
         { at: at(6), email: "admin.demo@example.com", event: "logout" },
       ];
@@ -116,6 +119,7 @@
     async addUser(email, role) {
       if (users.some(u => u.email === email)) throw new Error("Email đã có trong danh sách");
       users.push({ email, role, added: new Date().toISOString().slice(0, 10) });
+      return { tempPassword: "demo12345678" };
     },
     async removeUser(email) { users = users.filter(u => u.email !== email); },
   };

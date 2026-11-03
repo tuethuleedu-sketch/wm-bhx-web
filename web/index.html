@@ -16,16 +16,32 @@
   <section id="login" class="login">
     <form id="login-form" class="card login-card">
       <h1>WM+ ↔ BHX</h1>
-      <p class="muted">Bản đồ cạnh tranh theo bán kính. Chỉ email đã được Admin cấp quyền mới truy cập được.</p>
+      <p class="muted">Bản đồ cạnh tranh theo bán kính. Chỉ email đã được Admin cấp quyền mới truy cập được. Quên mật khẩu thì nhờ Admin cấp lại.</p>
       <label>Email <input id="login-email" type="email" required placeholder="ten@gmail.com" autocomplete="email"></label>
-      <div id="otp-row" hidden>
-        <label>Mã 6 số gửi tới email <input id="login-otp" inputmode="numeric" maxlength="6" placeholder="••••••"></label>
+      <label>Mật khẩu <input id="login-pw" type="password" required autocomplete="current-password"></label>
+      <div id="new-pw-row" class="login-card" hidden>
+        <label>Mật khẩu mới (ít nhất 8 ký tự) <input id="login-new" type="password" minlength="8" autocomplete="new-password"></label>
+        <label>Nhập lại mật khẩu mới <input id="login-new2" type="password" minlength="8" autocomplete="new-password"></label>
       </div>
-      <button type="submit" id="login-btn">Gửi mã đăng nhập</button>
+      <button type="submit" id="login-btn">Đăng nhập</button>
       <p id="login-msg" class="muted small"></p>
-      <button type="button" id="login-reset" class="link" hidden>Đổi email / gửi lại mã</button>
+      <button type="button" id="login-reset" class="link" hidden>Quay lại</button>
     </form>
   </section>
+
+  <!-- Đổi mật khẩu -->
+  <dialog id="pw-dialog" class="card">
+    <form id="pw-form" class="login-card">
+      <h3>Đổi mật khẩu</h3>
+      <label>Mật khẩu hiện tại <input id="pw-old" type="password" required autocomplete="current-password"></label>
+      <label>Mật khẩu mới (ít nhất 8 ký tự) <input id="pw-new" type="password" required minlength="8" autocomplete="new-password"></label>
+      <label>Nhập lại mật khẩu mới <input id="pw-new2" type="password" required minlength="8" autocomplete="new-password"></label>
+      <p class="muted small">Các máy khác đang đăng nhập sẽ bị đăng xuất.</p>
+      <p id="pw-msg" class="muted small"></p>
+      <button type="submit" id="pw-save">Lưu mật khẩu</button>
+      <button type="button" id="pw-cancel" class="link">Huỷ</button>
+    </form>
+  </dialog>
 
   <!-- Ứng dụng -->
   <section id="app" hidden>
@@ -39,23 +55,21 @@
         <button data-view="admin" data-admin>Phân quyền</button>
       </nav>
       <span class="user"><span id="user-email"></span> <span id="user-role" class="badge"></span>
+        <button id="pw-open" class="link">Đổi mật khẩu</button>
         <button id="logout" class="link">Đăng xuất</button></span>
     </header>
 
     <main>
       <!-- Tổng quan -->
       <div id="view-overview" class="view">
-        <div class="chips-row card">
-          <span class="muted small">Đối thủ hiển thị (bấm để bật/tắt):</span>
-          <div id="chips" class="chips"></div>
-        </div>
         <div class="controls card">
+          <div class="chips-box"><span class="chips-label">Đối thủ (bấm để bật/tắt)</span>
+            <div id="chips" class="chips"></div></div>
           <label>Chuỗi WM <select id="chuoi"><option value="">Tất cả</option><option>WM+</option><option>WMT</option></select></label>
           <label>Khu vực <select id="khu"><option value="">Tất cả</option><option>Urban</option><option>Rural</option><option value="-">Chưa phân loại</option></select></label>
           <label class="combo">Tỉnh <input id="tinh-q" placeholder="Tất cả — gõ để tìm tỉnh" autocomplete="off">
             <div class="combo-list" id="tinh-list" hidden></div></label>
-          <label class="slider">Bán kính <span class="r-row"><input id="r" type="range" min="0.5" max="20" step="0.5" value="1">
-            <input id="r-num" type="number" min="0.1" max="30" step="0.1" value="1"> km</span></label>
+          <label>Bán kính (km) <input id="r-num" type="number" min="0.1" max="30" step="0.1" value="1"></label>
           <label class="combo search">Tìm cửa hàng / địa chỉ <input id="q" placeholder="Mã, tên, số nhà, tên đường…" autocomplete="off">
             <div class="combo-list" id="q-list" hidden></div></label>
           <span class="muted small" id="snap-info"></span>
@@ -64,6 +78,7 @@
         <div class="kpis six">
           <div class="card kpi hl-wm"><span>Số cửa hàng WM trong bộ lọc</span><b id="k-nwm">–</b><small id="k-nwm-sub"></small></div>
           <div class="card kpi hl-bhx"><span>Số <i class="lab">BHX</i> trong bộ lọc</span><b id="k-nbhx">–</b><small id="k-nbhx-sub"></small></div>
+          <div class="card kpi"><span>Pressure</span><b id="k-press">–</b><small id="k-press-sub"></small></div>
           <div class="card kpi"><span>% WM có <i class="lab">BHX</i> trong R</span><b id="k-cov">–</b><small id="k-cov-sub"></small></div>
           <div class="card kpi"><span>Số <i class="lab">BHX</i> (unique) trong R</span><b id="k-uniq">–</b><small>mỗi cửa hàng đếm 1 lần</small></div>
           <div class="card kpi"><span><i class="lab">BHX</i> / WM bình quân</span><b id="k-avg">–</b><small>tính trùng nếu 1 cửa hàng gần nhiều WM</small></div>
@@ -72,7 +87,11 @@
 
         <div class="card map-card" id="map-card">
           <div id="map"></div>
-          <button class="map-full" id="map-full" title="Phóng to toàn màn hình">⛶ Toàn màn hình</button>
+          <aside id="area-panel" class="area-panel" hidden></aside>
+          <div class="map-tools">
+            <button class="map-full" id="map-notes" title="Hiện hoặc ẩn ghi chú % theo tỉnh trên bản đồ">Ẩn ghi chú tỉnh</button>
+            <button class="map-full" id="map-full" title="Phóng to toàn màn hình">⛶ Toàn màn hình</button>
+          </div>
           <div class="legend small">
             <span><i class="dot wm-hit"></i>WM có <i class="lab">BHX</i> trong R</span>
             <span><i class="dot wm-free"></i>WM chưa có <i class="lab">BHX</i> trong R</span>
@@ -81,37 +100,22 @@
           </div>
         </div>
 
-        <div class="grid2 even">
-          <div class="card">
-            <div class="card-head"><h3>WM <span class="muted small" id="wm-count"></span></h3>
-              <button class="ghost" id="exp-wm">Xuất CSV</button></div>
-            <div class="table-wrap"><table id="t-wm"><thead><tr>
-              <th data-k="ma">Mã</th><th data-k="chuoi">Chuỗi</th><th data-k="khu_vuc">Khu vực</th><th data-k="tinh">Tỉnh</th><th data-k="n" class="num"><i class="lab">BHX</i> trong R</th><th data-k="near" class="num">Gần nhất (km)</th>
-            </tr></thead><tbody></tbody></table></div>
+        <div class="card">
+          <div class="card-head wm-head">
+            <h3>Danh sách WM và đối thủ gần nhất <span class="muted small" id="wm-count"></span></h3>
+            <div class="wm-actions">
+              <label class="inline">Hiện <input id="top-n" type="number" min="1" step="1" value="5"> đối thủ gần nhất</label>
+              <button class="ghost" id="exp-wm">Xuất WM</button>
+              <button class="ghost" id="exp-bhx">Xuất đối thủ <span id="bhx-count"></span></button>
+            </div>
           </div>
-          <div class="card">
-            <div class="card-head"><h3><i class="lab">BHX</i> trong bộ lọc <span class="muted small" id="bhx-count"></span></h3>
-              <button class="ghost" id="exp-bhx">Xuất CSV toàn bộ</button></div>
-            <p class="muted small">Gồm cả cửa hàng không gần WM nào. Lọc theo nút đối thủ, Tỉnh và ô Tìm.</p>
-            <div class="table-wrap"><table id="t-bhx"><thead><tr>
-              <th>Chuỗi</th><th>Mã</th><th>Địa chỉ</th><th>Tỉnh</th><th class="num">WM trong R</th><th class="num">WM gần nhất (km)</th>
-            </tr></thead><tbody></tbody></table></div>
-          </div>
+          <p class="muted small" id="wm-hint"></p>
+          <div class="table-wrap tall"><table id="t-wm"><thead></thead><tbody></tbody></table></div>
         </div>
 
-        <div class="grid2 even">
-          <div class="card">
-            <div class="card-head"><h3>Cặp WM–<i class="lab">BHX</i> trong R <span class="muted small" id="pair-count"></span></h3>
-              <button class="ghost" id="exp-pairs">Xuất CSV</button></div>
-            <p class="muted small" id="pair-hint">Bấm 1 WM (bảng hoặc bản đồ) để xem đối thủ quanh cửa hàng đó.</p>
-            <div class="table-wrap"><table id="t-pairs"><thead><tr>
-              <th>Mã WM</th><th>Chuỗi</th><th>Mã</th><th>Địa chỉ</th><th class="num">Km</th>
-            </tr></thead><tbody></tbody></table></div>
-          </div>
-          <div class="card">
-            <h3>% WM có <i class="lab">BHX</i> trong R, theo tỉnh</h3>
-            <div id="bars"></div>
-          </div>
+        <div class="card">
+          <h3>% WM có <i class="lab">BHX</i> trong R, theo tỉnh</h3>
+          <div id="bars"></div>
         </div>
       </div>
 
@@ -187,6 +191,7 @@
   <script src="demo-data.js"></script>
   <script src="gas-api.js"></script>
   <script src="upload.js"></script>
+  <script src="area.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

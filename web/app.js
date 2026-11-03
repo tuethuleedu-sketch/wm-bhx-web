@@ -2,7 +2,7 @@
 (function () {
   const CFG = window.APP_CONFIG;
   const API = CFG.mode === "demo" ? window.DemoAPI : window.GasAPI;
-  const EARTH_R_KM = 6371.0088, R_MAX = 30;
+  const EARTH_R_KM = 6371.0088, R_MAX = 30, TOP_MIN = 10, TABLE_CELLS = 200000;
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (x, d = 0) => x.toLocaleString("vi-VN", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -15,7 +15,7 @@
     EMART: { name: "Emart", color: "#495057" }, KFM: { name: "Kingfood", color: "#8d5524" }, LOTTE: { name: "LOTTE", color: "#e64980" } };
   const chainName = (c) => (CHAINS[c] || { name: c }).name;
   // S.all: mọi đối thủ đã tải; S.bhx: phần đang bật ở nút lọc — toàn bộ phép tính khoảng cách chỉ dùng S.bhx.
-  let S = { user: null, wm: [], all: [], bhx: [], chains: new Set(["BHX"]), compStatus: {}, near: null, nearIdx: null, pairsBy: null, Rcalc: 0, R: 1,
+  let S = { user: null, wm: [], all: [], bhx: [], chains: new Set(["BHX"]), compStatus: {}, near: null, nearIdx: null, pairsBy: null, Rcalc: 0, R: 1, topBy: null, topN: 5,
     tinh: "", chuoi: "", khu: "", q: "", sel: null, sortK: "n", sortDir: -1 };
 
   // ---------- Tính toán ----------
@@ -29,17 +29,25 @@
     S.Rcalc = Math.max(CFG.maxRadiusKm, Math.ceil(S.R));
     const bLa = new Float64Array(m), bLo = new Float64Array(m), bC = new Float64Array(m);
     for (let j = 0; j < m; j++) { bLa[j] = bhx[j].lat * rad; bLo[j] = bhx[j].lng * rad; bC[j] = Math.cos(bLa[j]); }
-    S.near = new Float64Array(n); S.nearIdx = new Int32Array(n); S.pairsBy = [];
+    S.near = new Float64Array(n); S.nearIdx = new Int32Array(n); S.pairsBy = []; S.topBy = [];
+    const K = S.topK = Math.max(TOP_MIN, S.topN), sortAll = K > 50;   // K lớn: sắp xếp cả danh sách nhanh hơn chèn từng phần tử
     for (let i = 0; i < n; i++) {
-      const la = wm[i].lat * rad, lo = wm[i].lng * rad, c = Math.cos(la), list = [];
+      const la = wm[i].lat * rad, lo = wm[i].lng * rad, c = Math.cos(la), list = [], top = [];   // top: K đối thủ gần nhất, không phụ thuộc R
       let best = Infinity, bi = -1;
       for (let j = 0; j < m; j++) {
         const d = haversine(la, lo, c, bLa[j], bLo[j], bC[j]);
         if (d < best) { best = d; bi = j; }
         if (d <= S.Rcalc) list.push([j, Math.round(d * 1000) / 1000]);
+        if (sortAll) top.push([j, d]);
+        else if (top.length < K || d < top[top.length - 1][1]) {
+          let k = top.length; while (k > 0 && top[k - 1][1] > d) k--;
+          top.splice(k, 0, [j, d]); if (top.length > K) top.pop();
+        }
       }
       list.sort((a, b) => a[1] - b[1]);
+      if (sortAll) top.sort((a, b) => a[1] - b[1]);
       S.near[i] = Math.round(best * 1000) / 1000; S.nearIdx[i] = bi; S.pairsBy.push(list);
+      S.topBy.push(top.slice(0, K).map(([j, d]) => [j, Math.round(d * 1000) / 1000]));
     }
     nearB = null;
   }
@@ -48,6 +56,7 @@
   const provKey = (t) => plain(t).replace(/^\s*(thanh pho|tinh|tp\.?|t\.)\s*/, "").replace(/[^a-z0-9]/g, "").replace(/^hcm$/, "hochiminh");
   const inProv = (x) => !S.tinh || provKey(x.tinh) === S.tinh;
   const wmAttrOk = (w) => (!S.chuoi || w.chuoi === S.chuoi) && (!S.khu || (S.khu === "-" ? !w.khu_vuc : w.khu_vuc === S.khu));
+  const pressOk = (w) => !S.chuoi || w.chuoi === S.chuoi;   // Pressure lọc theo chuỗi, bỏ qua Khu vực
   const scopeIdx = () => S.wm.map((_, i) => i).filter((i) => wmAttrOk(S.wm[i]) && inProv(S.wm[i]));
   const bhxScope = () => S.bhx.map((_, j) => j).filter((j) => inProv(S.bhx[j]));
   const hit = (q, ...f) => !q || f.some((v) => plain(v).includes(q));
@@ -112,13 +121,35 @@
     // OSM chặn tile (403) nếu thiếu Referer; trang đặt no-referrer → riêng tile gửi origin (chỉ tên miền, không đường dẫn).
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       { maxZoom: 18, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
-    bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map);
+    bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map); noteLayer = L.layerGroup().addTo(map);
+  }
+  // Ghi chú trên bản đồ: % WM có đối thủ trong R và Pressure của từng tỉnh, đặt ở tâm các WM của tỉnh đó. Bấm để lọc tỉnh.
+  let noteLayer, showNotes = true;
+  function renderNotes(scope) {
+    noteLayer.clearLayers();
+    if (!showNotes) return;
+    const nBhx = new Map(), nWm = new Map(), inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+    S.bhx.forEach((b) => inc(nBhx, provKey(b.tinh)));
+    S.wm.filter(pressOk).forEach((w) => inc(nWm, provKey(w.tinh)));
+    const by = new Map();
+    scope.forEach((i) => {
+      const w = S.wm[i], k = provKey(w.tinh);
+      if (!by.has(k)) by.set(k, { hit: 0, n: 0, lat: 0, lng: 0 });
+      const p = by.get(k); p.n++; p.lat += w.lat; p.lng += w.lng; if (S.near[i] <= S.R) p.hit++;
+    });
+    by.forEach((p, k) => L.tooltip({ permanent: true, interactive: true, direction: "center", className: "prov-note" })
+      .setLatLng([p.lat / p.n, p.lng / p.n])
+      .setContent(`${esc(provName(k))}<br><small>Có đối thủ</small> <b>${pct(p.hit / p.n)}</b> <small>${fmt(p.hit)}/${fmt(p.n)} WM</small>`
+        + `<br><small>Pressure</small> <b>${nWm.get(k) ? pct((nBhx.get(k) || 0) / nWm.get(k)) : "–"}</b> <small>${fmt(nBhx.get(k) || 0)} ÷ ${fmt(nWm.get(k) || 0)}</small>`)
+      .on("click", () => setProv(S.tinh === k ? "" : k)).addTo(noteLayer));
   }
   // Lớp nền: toàn bộ BHX đang mở (chấm xám) — luôn hiện, kể cả khi chưa có WM+; lọc theo tỉnh. Bấm → popup thông tin.
   function buildBhxAll() {
     if (bhxAllLayer) bhxAllLayer.remove();
-    bhxAllMarkers = S.bhx.map((b, j) => L.circleMarker([b.lat, b.lng],
-      { radius: 3, weight: 0, fillColor: (CHAINS[b.chain] || CHAINS.BHX).color, fillOpacity: 0.4 })
+    // BHX rất nhiều nên chấm nhỏ, nhạt; các chuỗi khác ít hơn nên chấm to, viền trắng để không bị lẫn (BHX vẽ trước, nằm dưới).
+    bhxAllMarkers = S.bhx.map((b, j) => L.circleMarker([b.lat, b.lng], (b.chain === "BHX"
+      ? { radius: 3, weight: 0, fillOpacity: 0.45 } : { radius: 5, weight: 1, color: "#fff", fillOpacity: 0.85 }))
+      .setStyle({ fillColor: (CHAINS[b.chain] || CHAINS.BHX).color })
       .bindTooltip(storeTip(b)).bindPopup(() => bhxInfo(j)));
     bhxAllLayer = L.layerGroup().addTo(map);          // thêm trước WM+ → nằm dưới
   }
@@ -126,10 +157,11 @@
     bhxAllLayer.clearLayers();
     S.bhx.forEach((b, j) => { if (inProv(b)) bhxAllLayer.addLayer(bhxAllMarkers[j]); });
   }
-  // Thu phóng vừa bộ lọc (WM + BHX của tỉnh); không lọc tỉnh → vừa WM, chưa có WM thì vừa toàn bộ BHX.
-  function fitScope() {
+  // Thu phóng vừa bộ lọc (WM + đối thủ của tỉnh); không lọc tỉnh → vừa WM, chưa có WM thì vừa toàn bộ đối thủ.
+  // withComp: vừa cả đối thủ đang bật — dùng khi đổi nút lọc, vì chuỗi mới bật có thể nằm ngoài khung đang xem.
+  function fitScope(withComp) {
     let pts = scopeIdx().map((i) => S.wm[i]);
-    if (S.tinh) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
+    if (S.tinh || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
     if (pts.length) map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [20, 20], maxZoom: 14 });
   }
   // Danh sách tỉnh: hợp các tỉnh có WM hoặc có đối thủ (mọi chuỗi, kể cả chuỗi đang tắt).
@@ -154,12 +186,12 @@
       if (!inScope.has(i)) { mk.remove(); return; }
       mk.addTo(map).setStyle({ fillColor: S.near[i] <= S.R ? getVar("--wm-hit") : getVar("--wm-free"), radius: S.sel === i ? 9 : 5 });
     });
-    renderBhxAll(); bhxLayer.clearLayers(); ringLayer.clearLayers();
+    renderNotes(scope); renderBhxAll(); bhxLayer.clearLayers(); ringLayer.clearLayers();
     const src = S.sel != null ? [S.sel] : scope, seen = new Set();
     src.forEach((i) => S.pairsBy[i].forEach(([j, d]) => {
       if (d > S.R || seen.has(j)) return; seen.add(j);
       const b = S.bhx[j];
-      L.circleMarker([b.lat, b.lng], { radius: 4, weight: 0, fillColor: (CHAINS[b.chain] || CHAINS.BHX).color, fillOpacity: 0.95 })
+      L.circleMarker([b.lat, b.lng], { radius: b.chain === "BHX" ? 4 : 6, weight: b.chain === "BHX" ? 0 : 1.5, color: "#fff", fillColor: (CHAINS[b.chain] || CHAINS.BHX).color, fillOpacity: 1 })
         .bindTooltip(storeTip(b)).bindPopup(() => bhxInfo(j)).addTo(bhxLayer);
     }));
     if (S.sel != null) {
@@ -188,6 +220,10 @@
     const byComp = {}; bScope.forEach((j) => { const c = S.bhx[j].chain; byComp[c] = (byComp[c] || 0) + 1; });
     $("#k-nbhx-sub").textContent = (S.chains.size > 1 ? Object.entries(byComp).map(([c, k]) => `${chainName(c)} ${fmt(k)}`).join(" · ") + " · " : "")
       + (S.tinh ? `trong ${provName(S.tinh)}` : "cả nước, đang mở");
+    // Pressure = số đối thủ ÷ số WM, theo tỉnh và chuỗi; bỏ qua Khu vực vì đối thủ không có Urban/Rural. Không phụ thuộc R.
+    const nPress = S.wm.filter((w) => inProv(w) && pressOk(w)).length;
+    $("#k-press").textContent = nPress ? pct(bScope.length / nPress) : "–";
+    $("#k-press-sub").textContent = `${fmt(bScope.length)} ${lab()} ÷ ${fmt(nPress)} WM` + (S.khu ? " · không lọc theo Khu vực" : "");
     $("#k-cov").textContent = scope.length ? pct(cov / scope.length) : "–";
     $("#k-cov-sub").textContent = `${fmt(cov)} / ${fmt(scope.length)} WM`;
     $("#k-uniq").textContent = fmt(uniq.size);
@@ -202,18 +238,41 @@
        <div class="bar-track"><div class="bar-fill" style="width:${(c / n) * 100}%"></div></div><span class="bar-val">${pct(c / n)}</span></div>`).join("")
       || `<p class="muted small">Chưa có WM trong bộ lọc.</p>`;
 
-    renderWmTable(scope); renderBhxTable(); renderPairs(scope); renderMap(scope);
+    renderWmTable(scope); $("#bhx-count").textContent = `(${fmt(bhxRows().length)})`; renderMap(scope); renderArea();
   }
+  // Số nhập ở ô "Hiện … đối thủ" không có trần; chỉ không vượt quá số đối thủ đang bật.
+  const topN = () => Math.max(1, Math.min(S.topN, S.bhx.length));
+  // pct: trong N đối thủ gần nhất, bao nhiêu % nằm trong bán kính R.
   function wmRows(scope) {
-    const q = S.q;
-    return scope.filter((i) => hit(q, S.wm[i].ma, S.wm[i].ten, S.wm[i].dia_chi))
-      .map((i) => ({ i, ma: S.wm[i].ma, ten: S.wm[i].ten, chuoi: S.wm[i].chuoi, khu_vuc: S.wm[i].khu_vuc, tinh: S.wm[i].tinh, n: countIn(S.pairsBy[i], S.R), near: S.near[i] }));
+    const q = S.q, N = topN();
+    return scope.filter((i) => hit(q, S.wm[i].ma, S.wm[i].ten, S.wm[i].dia_chi)).map((i) => {
+      const w = S.wm[i], n = countIn(S.pairsBy[i], S.R), chains = new Set();
+      for (let k = 0; k < n; k++) chains.add(S.bhx[S.pairsBy[i][k][0]].chain);
+      return { i, w, ma: w.ma, ten: w.ten, chuoi: w.chuoi, khu_vuc: w.khu_vuc, tinh: w.tinh, n, near: S.near[i], pct: Math.min(n, N) / N, top: S.topBy[i].slice(0, N), nChains: chains.size };
+    });
   }
+  const activeChains = () => new Set(S.bhx.map((b) => b.chain)).size;
+  const storeShort = (b) => `${chainName(b.chain)} ${b.ten || b.ma}`;
   function renderWmTable(scope) {
-    const rows = wmRows(scope).sort((a, b) => (a[S.sortK] > b[S.sortK] ? 1 : a[S.sortK] < b[S.sortK] ? -1 : 0) * S.sortDir);
+    const rows = wmRows(scope).sort((a, b) => (a[S.sortK] > b[S.sortK] ? 1 : a[S.sortK] < b[S.sortK] ? -1 : 0) * S.sortDir), N = topN(), L = esc(lab());
+    // Quá nhiều ô thì trình duyệt treo: chỉ vẽ phần đầu, file Xuất WM vẫn đủ.
+    const maxRows = Math.floor(TABLE_CELLS / (9 + N)), shown = rows.slice(0, maxRows), totalChains = activeChains();
     $("#wm-count").textContent = `(${fmt(rows.length)})`;
-    $("#t-wm tbody").innerHTML = rows.map((r) =>
-      `<tr data-i="${r.i}"${r.i === S.sel ? ' class="sel"' : ""}><td>${esc(r.ma)}</td><td>${esc(r.chuoi)}</td><td>${esc(r.khu_vuc)}</td><td>${esc(r.tinh)}</td><td class="num">${r.n}</td><td class="num">${fmt(r.near, 3)}</td></tr>`).join("");
+    $("#wm-hint").innerHTML = S.sel != null
+      ? `Đang xem WM <b>${esc(S.wm[S.sel].ma)}</b> trên bản đồ · <button class="link" id="clear-sel">bỏ chọn</button>`
+      : `Bấm 1 dòng để xem cửa hàng đó trên bản đồ. Khoảng cách tô đậm: đối thủ nằm trong bán kính ${fmt(S.R, S.R % 1 ? 1 : 0)} km. Cột % = trong ${fmt(N)} đối thủ gần nhất, bao nhiêu % nằm trong bán kính.${rows.length > maxRows ? ` <b>Bảng chỉ hiện ${fmt(maxRows)} dòng đầu cho đỡ nặng; bấm Xuất WM để lấy đủ ${fmt(rows.length)} dòng.</b>` : ""}`;
+    $("#t-wm thead").innerHTML = `<tr><th data-k="ma">Mã CH</th><th data-k="ten">Tên CH</th><th data-k="chuoi">Chuỗi</th><th data-k="khu_vuc">Khu vực</th><th>Địa chỉ</th><th data-k="tinh">Tỉnh</th>`
+      + `<th data-k="n" class="num">${L} trong R</th><th data-k="pct">% top ${fmt(N)} trong R</th><th data-k="nChains" class="num" title="Trong các chuỗi đối thủ đang bật, bao nhiêu chuỗi có cửa hàng trong bán kính R">Số chuỗi trong R</th>`
+      + Array.from({ length: N }, (_, k) => `<th${k ? "" : ' data-k="near"'}>${L} #${k + 1}</th>`).join("") + `</tr>`;
+    $("#t-wm tbody").innerHTML = shown.map((r) =>
+      `<tr data-i="${r.i}"${r.i === S.sel ? ' class="sel"' : ""}><td>${esc(r.ma)}</td><td>${esc(r.ten)}</td><td>${esc(r.chuoi)}</td><td>${esc(r.khu_vuc)}</td><td class="addr">${esc(r.w.dia_chi)}</td><td>${esc(r.tinh)}</td>`
+      + `<td class="num">${r.n}</td><td><div class="pbar"><div class="pbar-track"><div class="pbar-fill" style="width:${r.pct * 100}%"></div></div><span>${fmt(r.pct * 100, 0)}%</span></div></td><td class="num">${r.nChains}/${totalChains}</td>`
+      + Array.from({ length: N }, (_, k) => {
+        const t = r.top[k]; if (!t) return "<td></td>";
+        const b = S.bhx[t[0]];
+        return `<td class="top ${t[1] <= S.R ? "in" : "out"}" title="${esc(b.dia_chi)}"><b>${fmt(t[1], 2)} km</b> <small>${esc(storeShort(b))}</small></td>`;
+      }).join("") + `</tr>`).join("")
+      || `<tr><td colspan="${9 + N}" class="muted">Chưa có WM trong bộ lọc (chưa tải file WM+ lên, hoặc file đã tự xoá sau 48 giờ).</td></tr>`;
   }
   function bhxRows() {
     const nb = bhxNearest();
@@ -222,35 +281,47 @@
       return { j, b: S.bhx[j], n: CNT_B[j], w, d: w ? Math.round(nb.d[j] * 1000) / 1000 : null };
     });
   }
-  function renderBhxTable() {
-    const rows = bhxRows().sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9)), LIM = 500;
-    $("#bhx-count").textContent = `(${fmt(rows.length)})`;
-    $("#t-bhx tbody").innerHTML = rows.slice(0, LIM).map((r) =>
-      `<tr data-j="${r.j}"><td>${esc(chainName(r.b.chain))}</td><td>${esc(r.b.ma)}</td><td>${esc(r.b.dia_chi)}</td><td>${esc(r.b.tinh)}</td><td class="num">${r.n}</td><td class="num">${r.d == null ? "–" : fmt(r.d, 3)}</td></tr>`).join("")
-      + (rows.length > LIM ? `<tr><td colspan="6" class="muted">Đang hiện ${LIM} cửa hàng gần WM nhất — bấm Xuất CSV để lấy đủ ${fmt(rows.length)}.</td></tr>` : "");
-  }
-  function pairRows(scope) {
-    const src = S.sel != null ? [S.sel] : scope, out = [];
-    src.forEach((i) => S.pairsBy[i].forEach(([j, d]) => { if (d <= S.R) out.push({ wm: S.wm[i], b: S.bhx[j], d }); }));
-    return out.sort((a, b) => a.d - b.d);
-  }
-  function renderPairs(scope) {
-    const rows = pairRows(scope), LIM = 300;
-    $("#pair-count").textContent = `(${fmt(rows.length)})`;
-    $("#pair-hint").innerHTML = S.sel != null
-      ? `Đang xem WM <b>${esc(S.wm[S.sel].ma)}</b> · <button class="link" id="clear-sel">bỏ chọn</button>`
-      : `Bấm 1 WM (bảng hoặc bản đồ) để xem đối thủ quanh cửa hàng đó.${rows.length > LIM ? ` Đang hiện ${LIM} cặp gần nhất; Xuất CSV để lấy đủ.` : ""}`;
-    $("#t-pairs tbody").innerHTML = rows.slice(0, LIM).map((r) =>
-      `<tr><td>${esc(r.wm.ma)}</td><td>${esc(chainName(r.b.chain))}</td><td>${esc(r.b.ma)}</td><td>${esc(r.b.dia_chi)}</td><td class="num">${fmt(r.d, 3)}</td></tr>`).join("");
-  }
   function select(i) {
     S.sel = S.sel === i ? null : i;
     if (S.sel != null) map.setView([S.wm[i].lat, S.wm[i].lng], Math.max(map.getZoom(), 13));
     renderOverview();
   }
+  // ---------- Thẻ đặc điểm khu vực (bấm 1 WM) ----------
+  const CUSTOMER = [["chung_cu", "Cư dân chung cư"], ["cong_nhan", "Công nhân, nhà máy, KCN"], ["hoc_sinh", "Học sinh, phụ huynh (trường học)"], ["sinh_vien", "Sinh viên (ĐH, CĐ)"],
+    ["benh_vien", "Bệnh nhân, người nhà (BV, phòng khám)"], ["van_phong", "Nhân viên văn phòng, cơ quan"], ["du_lich", "Khách du lịch, khách sạn"]];
+  const AGE_LABEL = ["0–14", "15–24", "25–44", "45–64", "65+"];
+  // Nhóm có mặt: mở sẵn, liệt kê tên và khoảng cách (gần trước) để khỏi phải tra bản đồ.
+  const placeRow = (label, list) => {
+    const named = list.filter((p) => p.name), unnamed = list.length - named.length;
+    return `<details open><summary>${esc(label)} <b>${fmt(list.length)}</b></summary><ul>${named.map((p) => `<li>${esc(p.name)} · ${fmt(p.d, 2)} km</li>`).join("")}</ul>`
+      + (unnamed ? `<small class="muted area-unnamed">${named.length ? "và " : ""}${fmt(unnamed)} điểm chưa có tên trên bản đồ</small>` : "") + `</details>`;
+  };
+  let areaTicket = 0;
+  async function renderArea() {
+    const el = $("#area-panel"), i = S.sel, ticket = ++areaTicket;
+    if (i == null) { el.hidden = true; return; }
+    const w = S.wm[i], R = S.R, Rt = fmt(R, R % 1 ? 1 : 0);
+    const head = `<div class="area-head"><div><b>${esc(w.chuoi)} ${esc(w.ma)}</b><br><span class="muted">Khu vực trong bán kính ${Rt} km</span></div><button class="link" id="area-close" title="Đóng">✕</button></div>`;
+    el.hidden = false;
+    if (!window.POP_GRID || !window.POI_DATA) el.innerHTML = head + `<p class="muted">Đang tải dữ liệu khu vực…</p>`;
+    try { await AreaInfo.load(); } catch (err) { if (ticket === areaTicket) el.innerHTML = head + `<p class="err">${esc(err.message)}</p>`; return; }
+    if (ticket !== areaTicket) return;
+    const a = AreaInfo.compute(w.lat, w.lng, R), p = a.pop, t = p.total, m = t ? p.male / t : 0;
+    const bar = (label, share) => `<div class="area-row"><span>${label}</span><div class="pbar-track"><div class="pbar-fill" style="width:${share * 100}%"></div></div><span>${fmt(share * 100, 0)}%</span></div>`;
+    const present = (rows) => rows.filter(([c]) => (a.places[c] || []).length).map(([c, label]) => placeRow(label, a.places[c])).join("");
+    const groups = present(CUSTOMER), gt = present([["cho", "Chợ"], ["tap_hoa", "Tạp hóa, cửa hàng nhỏ (dữ liệu thiếu nhiều)"]]);
+    el.innerHTML = head
+      + `<h4>Nhóm đối tượng trong bán kính</h4>${groups || `<p class="muted">Bản đồ công khai chưa ghi nhận điểm nào.</p>`}`
+      + `<h4>Chợ, tạp hóa</h4>${gt || `<p class="muted">Bản đồ công khai chưa ghi nhận điểm nào.</p>`}`
+      + `<h4>${esc(lab())} trong bán kính: <b>${fmt(countIn(S.pairsBy[i], R))}</b></h4>`
+      + `<details><summary>Dân số, giới tính, độ tuổi (ước tính) <b>${fmt(Math.round(t / 100) * 100)} người</b></summary>`
+      + (t ? bar("Nam", m) + bar("Nữ", 1 - m) + p.ages.map((v, k) => bar(AGE_LABEL[k], v / t)).join("") : "")
+      + (R < 1 ? `<small class="muted">Bán kính dưới 1 km sai số lớn vì lưới dân số mỗi ô khoảng 1 km.</small>` : "") + `</details>`
+      + `<div class="area-src">Danh sách theo bản đồ công khai, có thể thiếu: không thấy không có nghĩa là không có.<br>Nguồn: <a href="https://hub.worldpop.org/geodata/summary?id=98656" target="_blank" rel="noopener">WorldPop</a> ${a.year} (CC BY 4.0, ước tính bằng mô hình) · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> (ODbL), dữ liệu ngày ${esc(a.poiDate)}.</div>`;
+  }
   function setR(v) {
     v = Math.min(R_MAX, Math.max(0.1, Math.round(+v * 10) / 10 || 1));
-    S.R = v; $("#r").value = Math.min(v, 20); if (document.activeElement !== $("#r-num")) $("#r-num").value = v;
+    S.R = v; $("#r-num").value = v;
     if (v > S.Rcalc) computeAll();
     renderOverview();
   }
@@ -357,7 +428,7 @@
     $("#t-versions tbody").innerHTML = (await API.getVersions()).map((v) =>
       `<tr><td>${esc(v.version)}</td><td>${esc(v.uploaded)}</td><td>${esc(v.by)}</td><td class="num">${fmt(v.rows)}</td><td class="num">${v.added}</td><td class="num">${v.removed}</td><td class="num">${v.moved}</td><td>${esc(v.status)}</td></tr>`).join("");
   }
-  const EVENT = { login: "Đăng nhập", resume: "Mở lại phiên", logout: "Đăng xuất", denied: '<span class="tag close">Bị từ chối — chưa cấp quyền</span>' };
+  const EVENT = { login: "Đăng nhập", resume: "Mở lại phiên", logout: "Đăng xuất", denied: '<span class="tag close">Bị từ chối — chưa cấp quyền</span>', login_fail: '<span class="tag close">Sai mật khẩu</span>', pw_change: "Đổi mật khẩu", pw_reset: "Cấp mật khẩu tạm" };
   async function renderLog() {
     $("#t-log tbody").innerHTML = (await API.getAccessLog()).map((r) =>
       `<tr><td>${esc(new Date(r.at).toLocaleString("vi-VN"))}</td><td>${esc(r.email)}</td><td>${EVENT[r.event] || esc(r.event)}</td></tr>`).join("");
@@ -365,7 +436,7 @@
   async function renderUsers() {
     $("#t-users tbody").innerHTML = (await API.listUsers()).map((u) =>
       `<tr><td>${esc(u.email)}</td><td>${u.role === "admin" ? "Admin" : "Viewer"}</td><td>${esc(u.added)}</td>
-       <td>${u.email === S.user.email ? '<span class="muted small">bạn</span>' : `<button class="link" data-rm="${esc(u.email)}">Thu hồi</button>`}</td></tr>`).join("");
+       <td>${u.email === S.user.email ? '<span class="muted small">bạn</span>' : `<button class="link" data-pw="${esc(u.email)}">Cấp lại mật khẩu</button> <button class="link" data-rm="${esc(u.email)}">Thu hồi</button>`}</td></tr>`).join("");
   }
 
   // ---------- Khởi động ----------
@@ -470,41 +541,54 @@
     const st = await API.getSettings();
     const viewerExport = st.viewer_can_export !== false;
     const can = S.user.role === "admin" || viewerExport;
-    document.querySelectorAll("#exp-wm, #exp-bhx, #exp-pairs, #exp-changes").forEach((b) => (b.hidden = !can));
+    document.querySelectorAll("#exp-wm, #exp-bhx, #exp-changes").forEach((b) => (b.hidden = !can));
     $("#s-export").checked = viewerExport;
   }
 
   // Sự kiện
-  let otpStep = false;
-  function resetLogin(msg = "") {
-    otpStep = false; $("#otp-row").hidden = true; $("#login-reset").hidden = true;
-    $("#login-email").disabled = false; $("#login-otp").value = "";
-    $("#login-btn").textContent = "Gửi mã đăng nhập"; $("#login-msg").textContent = msg;
+  let newPwStep = false;
+  function setNewPwStep(on, msg = "") {
+    newPwStep = on; $("#new-pw-row").hidden = !on; $("#login-reset").hidden = !on;
+    $("#login-email").disabled = on; $("#login-pw").disabled = on;
+    $("#login-new").required = on; $("#login-new2").required = on;
+    $("#login-new").value = ""; $("#login-new2").value = "";
+    if (!on) $("#login-pw").value = "";
+    $("#login-btn").textContent = on ? "Lưu mật khẩu và vào" : "Đăng nhập"; $("#login-msg").textContent = msg;
   }
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const email = $("#login-email").value.trim().toLowerCase(), btn = $("#login-btn");
+    const email = $("#login-email").value.trim().toLowerCase(), pw = $("#login-pw").value, btn = $("#login-btn");
     btn.disabled = true;
     try {
-      if (!otpStep) {
-        await API.requestOtp(email);
-        otpStep = true; $("#otp-row").hidden = false; $("#login-reset").hidden = false; $("#login-email").disabled = true;
-        btn.textContent = "Đăng nhập"; $("#login-otp").focus();
-        $("#login-msg").textContent = API.mode === "demo" ? "Demo: không gửi mail, nhập mã bất kỳ." : "Đã gửi mã tới email. Kiểm tra cả mục Spam; mã hết hạn sau ít phút.";
+      if (!newPwStep) {
+        const u = await API.signIn(email, pw);
+        if (!u.mustChange) { await start(u); return; }
+        setNewPwStep(true, "Đây là mật khẩu tạm. Hãy đặt mật khẩu của riêng bạn để vào web.");
+        $("#login-new").focus();
       } else {
-        await start(await API.signIn(email, $("#login-otp").value.trim()));
+        if ($("#login-new").value !== $("#login-new2").value) throw new Error("Hai lần nhập mật khẩu mới không khớp.");
+        await start(await API.changePassword(email, pw, $("#login-new").value));
       }
-    } catch (err) {
-      // Lỗi "chưa được cấp quyền" → quay về bước nhập email
-      if (/cấp quyền/.test(err.message)) resetLogin(err.message); else $("#login-msg").textContent = err.message;
-    } finally { btn.disabled = false; }
+    } catch (err) { $("#login-msg").textContent = err.message; }
+    finally { btn.disabled = false; }
   });
-  $("#login-reset").addEventListener("click", () => resetLogin());
+  $("#login-reset").addEventListener("click", () => setNewPwStep(false));
+  if (API.mode === "demo") $("#login-msg").textContent = 'Demo: mật khẩu bất kỳ. Nhập "tam" để xem bước đặt mật khẩu mới.';
+  $("#pw-open").addEventListener("click", () => { $("#pw-form").reset(); $("#pw-msg").textContent = ""; $("#pw-dialog").showModal(); });
+  $("#pw-cancel").addEventListener("click", () => $("#pw-dialog").close());
+  $("#pw-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("#pw-save");
+    if ($("#pw-new").value !== $("#pw-new2").value) { $("#pw-msg").textContent = "Hai lần nhập mật khẩu mới không khớp."; return; }
+    btn.disabled = true;
+    try { await API.changePassword(S.user.email, $("#pw-old").value, $("#pw-new").value); $("#pw-dialog").close(); }
+    catch (err) { $("#pw-msg").textContent = err.message; }
+    finally { btn.disabled = false; }
+  });
   $("#log-refresh").addEventListener("click", renderLog);
   $("#s-export").addEventListener("change", async (e) => { await API.setSetting("viewer_can_export", e.target.checked); $("#u-msg").textContent = "Đã lưu cài đặt."; });
   $("#logout").addEventListener("click", async () => { await API.signOut(); location.reload(); });
   $("#tabs").addEventListener("click", (e) => { if (e.target.dataset.view) show(e.target.dataset.view); });
-  $("#r").addEventListener("input", (e) => setR(e.target.value));
   $("#r-num").addEventListener("change", (e) => setR(e.target.value));
   $("#chips").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b || b.disabled) return;
@@ -513,11 +597,20 @@
       S.chains = new Set(has.every((c) => S.chains.has(c)) ? ["BHX"] : has);
     } else if (S.chains.has(b.dataset.c)) { if (S.chains.size > 1) S.chains.delete(b.dataset.c); }   // luôn giữ ít nhất 1 chuỗi
     else S.chains.add(b.dataset.c);
-    applyChains();
+    applyChains(); fitScope(true);
   });
   $("#chuoi").addEventListener("change", (e) => { S.chuoi = e.target.value; S.sel = null; renderOverview(); fitScope(); });
   $("#khu").addEventListener("change", (e) => { S.khu = e.target.value; S.sel = null; renderOverview(); fitScope(); });
-  $("#q").addEventListener("input", (e) => { S.q = plain(e.target.value.trim()); renderWmTable(scopeIdx()); renderBhxTable(); });
+  $("#q").addEventListener("input", (e) => { S.q = plain(e.target.value.trim()); renderWmTable(scopeIdx()); $("#bhx-count").textContent = `(${fmt(bhxRows().length)})`; });
+  $("#top-n").addEventListener("change", (e) => {
+    S.topN = Math.max(1, Math.floor(+e.target.value) || 5);
+    if (S.topN > S.topK && S.topK < S.bhx.length) computeAll();
+    S.topN = topN(); e.target.value = S.topN; renderWmTable(scopeIdx());
+  });
+  $("#area-panel").addEventListener("click", (e) => { if (e.target.id === "area-close") select(S.sel); });
+  $("#map-notes").addEventListener("click", (e) => {
+    showNotes = !showNotes; e.target.textContent = showNotes ? "Ẩn ghi chú tỉnh" : "Hiện ghi chú tỉnh"; renderNotes(scopeIdx());
+  });
   // Phủ kín cửa sổ bằng CSS, không phụ thuộc quyền fullscreen của trình duyệt.
   function setMapMax(on) {
     $("#map-card").classList.toggle("map-max", on);
@@ -533,26 +626,38 @@
   });
   $("#t-wm").addEventListener("click", (e) => {
     const th = e.target.closest("th[data-k]");
-    if (th) { S.sortDir = S.sortK === th.dataset.k ? -S.sortDir : (th.dataset.k === "n" ? -1 : 1); S.sortK = th.dataset.k; renderWmTable(scopeIdx()); return; }
+    if (th) { S.sortDir = S.sortK === th.dataset.k ? -S.sortDir : (["n", "pct", "nChains"].includes(th.dataset.k) ? -1 : 1); S.sortK = th.dataset.k; renderWmTable(scopeIdx()); return; }
     const tr = e.target.closest("tr[data-i]"); if (tr) select(+tr.dataset.i);
   });
-  $("#t-bhx").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-j]"); if (tr) focusStore("bhx", +tr.dataset.j); });
-  $("#pair-hint").addEventListener("click", (e) => { if (e.target.id === "clear-sel") select(S.sel); });
-  $("#exp-wm").addEventListener("click", () => downloadCsv(`wm_${fileTag()}.csv`, ["Mã WM", "Tên WM", "Chuỗi", "Khu vực", "Địa chỉ", "Tỉnh", "Bán kính (km)", `Số ${lab()} trong R`, `${lab()} gần nhất (km)`, "Lat WM", "Lng WM"],
-    wmRows(scopeIdx()).map((r) => [r.ma, r.ten, r.chuoi, r.khu_vuc, S.wm[r.i].dia_chi, r.tinh, S.R, r.n, r.near, S.wm[r.i].lat, S.wm[r.i].lng])));
+  $("#wm-hint").addEventListener("click", (e) => { if (e.target.id === "clear-sel") select(S.sel); });
+  // Mỗi WM 1 dòng, khối đối thủ #1..#N theo template MASTER (Code / Address / Distance).
+  $("#exp-wm").addEventListener("click", () => {
+    const N = topN(), blocks = [];
+    for (let k = 1; k <= N; k++) blocks.push(`Chain_${k}`, `Code_${k}`, `Name_${k}`, `Address_${k}`, `Distance_${k} (km)`);
+    downloadCsv(`wm_top${N}_${fileTag()}.csv`, ["Mã CH", "Tên CH", "Chuỗi", "Khu vực", "Địa chỉ", "Tỉnh", "Lat WM", "Lng WM", "Bán kính (km)", "Số đối thủ trong R", `% top ${N} trong R`, "Số chuỗi trong R", "Số chuỗi đang bật", ...blocks],
+      wmRows(scopeIdx()).map((r) => [r.ma, r.ten, r.chuoi, r.khu_vuc, r.w.dia_chi, r.tinh, r.w.lat, r.w.lng, S.R, r.n, Math.round(r.pct * 100) + "%", r.nChains, activeChains(),
+        ...Array.from({ length: N }, (_, k) => { const t = r.top[k], b = t && S.bhx[t[0]]; return b ? [chainName(b.chain), b.ma, b.ten || "", b.dia_chi, t[1]] : ["", "", "", "", ""]; }).flat()]));
+  });
   $("#exp-bhx").addEventListener("click", () => downloadCsv(`doithu_${fileTag()}.csv`, ["Đối thủ", "Mã", "Tên", "Địa chỉ", "Tỉnh", "Lat", "Lng", "Bán kính (km)", "Số WM trong R", "WM gần nhất", "Chuỗi WM gần nhất", "Khoảng cách WM gần nhất (km)"],
     bhxRows().map((r) => [chainName(r.b.chain), r.b.ma, r.b.ten || "", r.b.dia_chi, r.b.tinh, r.b.lat, r.b.lng, S.R, r.n, r.w ? r.w.ma : "", r.w ? r.w.chuoi : "", r.d ?? ""])));
-  $("#exp-pairs").addEventListener("click", () => downloadCsv(`pairs_${fileTag()}.csv`, ["Mã WM", "Chuỗi", "Khu vực", "Tỉnh", "Đối thủ", "Mã đối thủ", "Địa chỉ đối thủ", "Khoảng cách (km)", "Lat đối thủ", "Lng đối thủ"],
-    pairRows(scopeIdx()).map((r) => [r.wm.ma, r.wm.chuoi, r.wm.khu_vuc, r.wm.tinh, chainName(r.b.chain), r.b.ma, r.b.dia_chi, r.d, r.b.lat, r.b.lng])));
   ["#c-chain", "#c-type", "#c-from", "#c-tinh"].forEach((s) => $(s).addEventListener("input", renderChanges));
   $("#exp-changes").addEventListener("click", () => downloadCsv("bhx_thay_doi.csv", ["Ngày", "Đối thủ", "Loại", "Mã", "Địa chỉ", "Tỉnh", "WM+ trong 2 km", "WM+ gần nhất (km)", "Lat", "Lng"],
     changeRows().map((e) => [e.date, chainName(e.chain), TYPE[e.type], e.ma, e.dia_chi, e.tinh, e.n2, e.near.toFixed(3), e.lat, e.lng])));
   $("#add-user").addEventListener("submit", async (e) => {
     e.preventDefault();
-    try { await API.addUser($("#u-email").value.trim().toLowerCase(), $("#u-role").value); $("#u-email").value = ""; $("#u-msg").textContent = "Đã cấp quyền."; renderUsers(); }
+    const email = $("#u-email").value.trim().toLowerCase();
+    try { showTempPw(email, (await API.addUser(email, $("#u-role").value)).tempPassword); $("#u-email").value = ""; renderUsers(); }
     catch (err) { $("#u-msg").textContent = err.message; }
   });
+  const showTempPw = (email, pw) => { $("#u-msg").textContent = `Mật khẩu tạm của ${email}: ${pw} — chỉ hiện lần này, hạn 7 ngày. Hãy gửi riêng cho người đó; lần đầu vào họ sẽ phải đặt mật khẩu mới.`; };
   $("#t-users").addEventListener("click", async (e) => {
+    const pwEm = e.target.dataset.pw;
+    if (pwEm) {
+      if (!confirm(`Cấp mật khẩu tạm mới cho ${pwEm}? Mật khẩu cũ sẽ hết hiệu lực và người đó bị đăng xuất.`)) return;
+      try { showTempPw(pwEm, (await API.resetPassword(pwEm)).tempPassword); }
+      catch (err) { $("#u-msg").textContent = err.message; }
+      return;
+    }
     const em = e.target.dataset.rm; if (!em || !confirm(`Thu hồi quyền của ${em}?`)) return;
     try { await API.removeUser(em); $("#u-msg").textContent = "Đã thu hồi quyền."; renderUsers(); }
     catch (err) { $("#u-msg").textContent = err.message; }
