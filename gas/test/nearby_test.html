@@ -71,6 +71,31 @@ B.forEach((q) => {
   if (a[0][0] !== bi || a[0][1] !== best || n2b !== n2) okN = false;
 });
 okN ? ok++ : (bad++, lines.push("[FAIL] gần nhất / đếm trong 2 km"));
+// Lập tuyến: so với thử mọi thứ tự (ít điểm); nhiều điểm thì đúng là một hoán vị và không dài hơn đi theo thứ tự ban đầu
+const pathKm = (s, pts, ord) => { const dist = (a, b) => { const la = a.lat * rad, lb = b.lat * rad; return haversine(la, a.lng * rad, Math.cos(la), lb, b.lng * rad, Math.cos(lb)); }; let t = 0, p = s; for (const k of ord) { t += dist(p, pts[k]); p = pts[k]; } return t; };
+const perms = (n) => { const out = [], a = Array.from({ length: n }, (_, k) => k); const go = (i) => { if (i === n) { out.push(a.slice()); return; } for (let j = i; j < n; j++) { [a[i], a[j]] = [a[j], a[i]]; go(i + 1); [a[i], a[j]] = [a[j], a[i]]; } }; go(0); return out; };
+let okR = true;
+for (let t = 0; t < 40; t++) {
+  const n = 1 + t % 8, pts = country(n), s = country(1)[0], r = Nearby.route(s, pts);
+  const best = Math.min(...perms(n).map((o) => pathKm(s, pts, o)));
+  if (Math.abs(r.total - best) > 1e-6 || new Set(r.order).size !== n || !r.exact) okR = false;
+}
+okR ? ok++ : (bad++, lines.push("[FAIL] tuyến ít điểm chưa ngắn nhất"));
+const asc = (n) => Array.from({ length: n }, (_, k) => k);
+let okH = true, ratio = 0;
+for (const n of [13, 20, 50, 200]) {
+  const pts = n > 100 ? cluster(n, 21, 105.8, 0.5) : country(n), s = pts[0], r = Nearby.route(s, pts);
+  if (new Set(r.order).size !== n || r.exact || r.total > pathKm(s, pts, asc(n)) + 1e-6) okH = false;
+  if (Math.abs(r.total - pathKm(s, pts, r.order)) > 1e-6) okH = false;
+}
+// Tuyến 13 điểm so với lời giải chính xác: thêm 1 điểm trùng điểm xuất phát thì đáp án chính xác 12 điểm vẫn đúng
+for (let t = 0; t < 30; t++) {
+  const pts = cluster(12, 21, 105.8, 1), s = { lat: 21, lng: 105.8 }, exact = Nearby.route(s, pts), h = Nearby.route(s, pts.concat([{ ...s }]));
+  ratio = Math.max(ratio, h.total / exact.total);
+}
+if (ratio > 1.05) okH = false;
+okH ? ok++ : (bad++, lines.push("[FAIL] tuyến nhiều điểm"));
+lines.push(`Tuyến nhiều điểm so với tối ưu: dài hơn tối đa ${((ratio - 1) * 100).toFixed(1)}%`);
 lines.push(`${ok} đạt, ${bad} lỗi`);
 const big = [north(3000).concat(south(1000)), dup(north(1700).concat(south(800)))];
 let t = performance.now(); brute(big[0], big[1], 10, 5); const tOld = performance.now() - t;
