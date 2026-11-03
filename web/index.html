@@ -77,6 +77,7 @@
           <label>Vùng <select id="vung" title="Theo cột Vùng của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều vùng thì theo WM gần nhất"><option value="">Tất cả</option></select></label>
           <label class="combo">Tỉnh <input id="tinh-q" placeholder="Tất cả — gõ để tìm tỉnh" autocomplete="off">
             <div class="combo-list" id="tinh-list" hidden></div></label>
+          <label>Quận <select id="quan" title="Theo cột Quận/Huyện của file WM+. Đối thủ theo địa chỉ; địa chỉ không ghi quận thì theo WM gần nhất trong tỉnh"><option value="">Tất cả</option></select></label>
           <label>Bán kính (km) <input id="r-num" type="number" min="0.1" max="30" step="0.1" value="1"></label>
           <label class="combo search">Tìm cửa hàng / địa chỉ <input id="q" placeholder="Mã, tên, số nhà, tên đường…" autocomplete="off">
             <div class="combo-list" id="q-list" hidden></div></label>
@@ -106,6 +107,15 @@
             <span><i class="dot ring-wmt"></i>Viền tím = WMT</span>
             <span>Chấm đậm: đối thủ trong R · chấm nhạt: ngoài R (bấm để xem thông tin); màu theo nút lọc ở trên</span>
           </div>
+          <div class="route-bar small">
+            <b>Lập tuyến đi WM</b>
+            <label>Xuất phát <select id="rt-from"><option value="sel">WM đang chọn</option><option value="click">Điểm bấm trên bản đồ</option><option value="gps">Vị trí của tôi</option></select></label>
+            <label>Số cửa hàng <input id="rt-n" type="number" min="1" max="50" step="1" value="10"></label>
+            <button id="rt-go">Lập tuyến</button>
+            <button class="ghost" id="rt-clear" hidden>Xoá tuyến</button>
+            <span class="muted" id="rt-msg"></span>
+          </div>
+          <div id="rt-result" class="route-result small" hidden></div>
         </div>
 
         <div class="card">
@@ -153,7 +163,7 @@
             <b>Mã</b> <code>Mã WM+ / Mã CH / Mã SAP / Code</code> · <b>Tỉnh</b> <code>Tỉnh mới / Tỉnh/Thành / Tỉnh/TP / Tỉnh/TP cũ trước 1/7 / Tỉnh</code> ·
             <b>Vĩ độ</b> <code>Latitude / Vĩ độ / Lat</code> · <b>Kinh độ</b> <code>Longitude / Kinh độ / Lng / Long</code>.
             Tuỳ chọn: <b>Tên</b> <code>Tên WM+ / Tên CH / Tên cửa hàng</code> · <b>Khu vực</b> <code>Khu vực / Urban/Rural</code> (Urban, Rural, Thành thị, Nông thôn) ·
-            <b>Chuỗi</b> <code>Chuỗi / Chain</code> (WM+ hoặc WMT) · <b>Địa chỉ</b> <code>Địa chỉ / Address</code> · <b>Miền</b> <code>Miền / Vùng miền</code> · <b>Vùng</b> <code>Vùng / Region / Zone</code> (ghi sao lên bộ lọc vậy).</p>
+            <b>Chuỗi</b> <code>Chuỗi / Chain</code> (WM+ hoặc WMT) · <b>Địa chỉ</b> <code>Địa chỉ / Address</code> · <b>Miền</b> <code>Miền / Vùng miền</code> · <b>Vùng</b> <code>Vùng / Region / Zone</code> · <b>Quận</b> <code>Quận/Huyện / Quận / Huyện / District</code> (ghi sao lên bộ lọc vậy).</p>
           <p class="muted small">File được đọc ngay trên trình duyệt; chỉ các cột trên được gửi lên khi bạn bấm <b>Áp dụng</b>. Mỗi lần áp dụng <b>thay toàn bộ</b> danh sách cũ — muốn có cả WM+ và WMT thì để chung 1 file, phân biệt bằng cột Chuỗi. Dữ liệu tự xoá sau 48 giờ.</p>
           <div class="controls">
             <label>File <input type="file" id="up-file" accept=".xlsx,.xls,.csv"></label>

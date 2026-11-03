@@ -121,6 +121,12 @@ i.lab { font-style: normal; }
 .bar-val { text-align: right; font-variant-numeric: tabular-nums; }
 
 .table-wrap { max-height: 340px; overflow: auto; border-top: 1px solid var(--line); }
+.route-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 10px 12px 0; }
+.route-bar input { width: 70px; }
+.route-result { padding: 8px 12px 12px; }
+.route-result .table-wrap { max-height: 260px; }
+.rt-num { background: #0b6bcb; color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 11px/18px sans-serif; text-align: center; box-shadow: 0 0 2px #0008; }
+.rt-num.start { background: #222; }
 .gmap-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-weight: 400; }
 .table-wrap.tall { max-height: 620px; }
 .pager { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; }

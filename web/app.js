@@ -16,7 +16,7 @@
   const chainName = (c) => (CHAINS[c] || { name: c }).name;
   // S.all: mọi đối thủ đã tải; S.bhx: phần đang bật ở nút lọc — toàn bộ phép tính khoảng cách chỉ dùng S.bhx.
   let S = { user: null, wm: [], all: [], bhx: [], chains: new Set(["BHX"]), compStatus: {}, near: null, nearIdx: null, pairsBy: null, Rcalc: 0, R: 1, topBy: null, topN: 5,
-    mien: "", vung: "", tinh: "", chuoi: "", khu: "", q: "", sel: null, sortK: "n", sortDir: -1 };
+    mien: "", vung: "", tinh: "", quan: "", chuoi: "", khu: "", q: "", sel: null, sortK: "n", sortDir: -1 };
 
   // ---------- Tính toán ----------
   // Lưu sẵn các cặp WM–BHX trong bán kính Rcalc (≥ 5 km, tự tăng khi kéo R lớn hơn) và K đối thủ gần nhất, không phụ thuộc R.
@@ -46,12 +46,28 @@
   const regionOpts = (wms, rows, dim) => `<option value="">Tất cả</option>`
     + [...new Set(wms.map((w) => w[dim]))].filter((v) => v !== "-").sort((a, b) => a.localeCompare(b, "vi", { numeric: true })).map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")
     + (rows.some((x) => x[dim] === "-") ? `<option value="-">Chưa rõ</option>` : "");
+  // Quận của đối thủ: ưu tiên tên quận (theo file WM+ của tỉnh đó) ghi trong địa chỉ, không có thì theo WM gần nhất trong tỉnh.
+  function quanInAddress(b) {
+    const list = QUAN_RE.get(provKey(b.tinh)), a = plain(b.dia_chi);
+    return list && a ? (list.find((q) => q.re.test(a)) || {}).name : undefined;
+  }
+  let QUAN_RE = new Map();
+  function buildQuanRe() {
+    QUAN_RE = new Map();
+    WM_IN_PROV.quan.forEach((wms, k) => QUAN_RE.set(k, [...new Set(wms.map((w) => w.quan))].sort((a, b) => b.length - a.length).map((name) => {
+      const full = plain(name).trim(), short = full.replace(/^(quan|huyen|thi xa|thanh pho|tp\.?)\s+/, "");
+      const pick = /^\d+$/.test(short) ? full : short;   // "Quận 1" giữ nguyên chữ quận, kẻo khớp nhầm số nhà
+      return { name, re: new RegExp("(^|[^a-z0-9])" + pick.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|[^a-z0-9])") };
+    })));
+  }
   function buildRegions() {
-    ["mien", "vung"].forEach((dim) => {
+    ["mien", "vung", "quan"].forEach((dim) => {
       const m = WM_IN_PROV[dim] = new Map();
       S.wm.forEach((w) => { if (w[dim] === "-") return; const k = provKey(w.tinh); if (!m.has(k)) m.set(k, []); m.get(k).push(w); });
       S.all.forEach((b) => (b[dim] = regionAt(b, dim)));
     });
+    buildQuanRe();
+    S.all.forEach((b) => (b.quan = quanInAddress(b) || b.quan));
     const rows = S.wm.concat(S.all);
     $("#mien").innerHTML = $("#c-mien").innerHTML = regionOpts(S.wm, rows, "mien");
     $("#c-vung").innerHTML = regionOpts(S.wm, rows, "vung");
@@ -67,7 +83,19 @@
   const inVung = (x) => (!S.mien || x.mien === S.mien) && (!S.vung || x.vung === S.vung);
   // Các tỉnh còn lại sau khi lọc Miền/Vùng
   const provsInRegion = () => new Set(S.wm.concat(S.all).filter(inVung).map((x) => provKey(x.tinh)));
-  const inProv = (x) => inVung(x) && (!S.tinh || provKey(x.tinh) === S.tinh);
+  // Tên quận trùng nhau giữa các tỉnh nên khoá gồm cả tỉnh.
+  const quanKey = (x) => provKey(x.tinh) + "|" + x.quan;
+  const inQuan = (x) => !S.quan || (S.quan === "-" ? x.quan === "-" : quanKey(x) === S.quan);
+  // Ô Quận chỉ liệt kê các quận thuộc Miền/Vùng/Tỉnh đang chọn; quận đang chọn không còn trong đó thì bỏ.
+  function fillQuan() {
+    const ok = (x) => inVung(x) && (!S.tinh || provKey(x.tinh) === S.tinh), el = $("#quan"), names = new Map();
+    S.wm.filter(ok).forEach((w) => { if (w.quan !== "-") names.set(quanKey(w), w.quan + (S.tinh ? "" : " · " + provName(provKey(w.tinh)))); });
+    el.innerHTML = `<option value="">Tất cả</option>` + [...names].sort((a, b) => a[1].localeCompare(b[1], "vi", { numeric: true })).map(([k, t]) => `<option value="${esc(k)}">${esc(t)}</option>`).join("")
+      + (S.wm.concat(S.all).filter(ok).some((x) => x.quan === "-") ? `<option value="-">Chưa rõ</option>` : "");
+    if (![...el.options].some((o) => o.value === S.quan)) S.quan = "";
+    el.value = S.quan;
+  }
+  const inProv = (x) => inVung(x) && inQuan(x) && (!S.tinh || provKey(x.tinh) === S.tinh);
   const wmAttrOk = (w) => (!S.chuoi || w.chuoi === S.chuoi) && (!S.khu || (S.khu === "-" ? !w.khu_vuc : w.khu_vuc === S.khu));
   const pressOk = (w) => !S.chuoi || w.chuoi === S.chuoi;   // Pressure lọc theo chuỗi, bỏ qua Khu vực
   const scopeIdx = () => S.wm.map((_, i) => i).filter((i) => wmAttrOk(S.wm[i]) && inProv(S.wm[i]));
@@ -144,8 +172,8 @@
     noteLayer.clearLayers();
     if (!showNotes) return;
     const nBhx = new Map(), nWm = new Map(), inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
-    S.bhx.filter(inVung).forEach((b) => inc(nBhx, provKey(b.tinh)));
-    S.wm.filter((w) => pressOk(w) && inVung(w)).forEach((w) => inc(nWm, provKey(w.tinh)));
+    S.bhx.filter((b) => inVung(b) && inQuan(b)).forEach((b) => inc(nBhx, provKey(b.tinh)));
+    S.wm.filter((w) => pressOk(w) && inVung(w) && inQuan(w)).forEach((w) => inc(nWm, provKey(w.tinh)));
     const by = new Map();
     scope.forEach((i) => {
       const w = S.wm[i], k = provKey(w.tinh);
@@ -176,7 +204,7 @@
   // withComp: vừa cả đối thủ đang bật — dùng khi đổi nút lọc, vì chuỗi mới bật có thể nằm ngoài khung đang xem.
   function fitScope(withComp) {
     let pts = scopeIdx().map((i) => S.wm[i]);
-    if (S.tinh || S.mien || S.vung || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
+    if (S.tinh || S.quan || S.mien || S.vung || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
     if (pts.length) map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [20, 20], maxZoom: 14 });
   }
   // Danh sách tỉnh: hợp các tỉnh có WM hoặc có đối thủ (mọi chuỗi, kể cả chuỗi đang tắt).
@@ -189,15 +217,15 @@
     PROVS = [...P].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }
   const provName = (k) => (PROVS.find((p) => p.key === k) || {}).name || "";
-  function clearRegion() { S.mien = S.vung = ""; $("#mien").value = ""; fillVung(); }
+  function clearRegion() { S.mien = S.vung = ""; $("#mien").value = ""; fillVung(); fillQuan(); }
   function regionChanged() {
     S.sel = null; fillVung();
     if (S.tinh && !provsInRegion().has(S.tinh)) { S.tinh = ""; $("#tinh-q").value = ""; }   // tỉnh đang chọn không thuộc miền/vùng mới
-    renderOverview(); fitScope();
+    fillQuan(); renderOverview(); fitScope();
   }
   function setProv(k) {
     if (k && !provsInRegion().has(k)) clearRegion();   // chọn tỉnh ngoài vùng (bấm ghi chú, tìm cửa hàng) → bỏ lọc vùng
-    S.tinh = k; S.sel = null; $("#tinh-q").value = provName(k); renderOverview(); fitScope();
+    S.tinh = k; S.sel = null; $("#tinh-q").value = provName(k); fillQuan(); renderOverview(); fitScope();
   }
   function buildWmMarkers() {                         // gọi lại mỗi khi danh sách WM+ đổi (upload)
     wmMarkers.forEach((mk) => mk.remove());
@@ -210,6 +238,7 @@
       if (!inScope.has(i)) { mk.remove(); return; }
       mk.addTo(map).setStyle({ fillColor: S.near[i] <= S.R ? getVar("--wm-hit") : getVar("--wm-free"), radius: S.sel === i ? 9 : 5 });
     });
+    if (RT && RT.key !== filterKey()) clearRoute();     // đổi bộ lọc thì tuyến cũ không còn đúng
     renderNotes(scope); renderBhxAll(); bhxLayer.clearLayers(); ringLayer.clearLayers();
     const src = S.sel != null ? [S.sel] : scope, seen = new Set();
     src.forEach((i) => S.pairsBy[i].forEach(([j, d]) => {
@@ -224,6 +253,56 @@
     }
   }
   const getVar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+  // ---------- Lập tuyến ----------
+  // Chọn N WM gần điểm xuất phát nhất trong bộ lọc, rồi xếp thứ tự đi ngắn nhất theo đường thẳng (không gửi toạ độ đi đâu).
+  // Đường đi thật chỉ có khi người dùng bấm mở Google Maps; mỗi link Google nhận tối đa 10 điểm nên tuyến dài chia thành nhiều chặng.
+  const GMAP_STOPS = 10;
+  let RT = null, rtLayer = null, rtPick = null;
+  const filterKey = () => [S.mien, S.vung, S.tinh, S.quan, S.chuoi, S.khu].join("|");
+  function stopPick() { if (rtPick) { map.off("click", rtPick); rtPick = null; } }
+  function clearRoute() {
+    stopPick(); RT = null;
+    if (rtLayer) rtLayer.clearLayers();
+    $("#rt-result").hidden = true; $("#rt-clear").hidden = true; $("#rt-msg").textContent = "";
+  }
+  function buildRoute(start, startI) {
+    const N = Math.max(1, Math.min(50, Math.floor(+$("#rt-n").value) || 10)), scope = scopeIdx().filter((i) => i !== startI);
+    $("#rt-n").value = N; stopPick();
+    if (!scope.length) { $("#rt-msg").textContent = "Không có WM nào khác trong bộ lọc."; return; }
+    const near = Nearby.search(Nearby.index(scope.map((i) => S.wm[i])), start.lat, start.lng, N, 0).slice(0, N).map(([k]) => scope[k]);
+    const r = Nearby.route(start, near.map((i) => S.wm[i]));
+    RT = { key: filterKey(), start, stops: r.order.map((k) => near[k]), legs: r.legs, total: r.total, exact: r.exact };
+    $("#rt-msg").textContent = ""; $("#rt-clear").hidden = false;
+    drawRoute();
+  }
+  const numIcon = (t, cls = "") => L.divIcon({ className: "rt-num " + cls, html: t, iconSize: [22, 22] });
+  function gmapDirLinks() {
+    const pt = (p) => `${p.lat}%2C${p.lng}`, stops = RT.stops.map((i) => S.wm[i]), out = [];
+    for (let a = 0; a < stops.length; a += GMAP_STOPS) {
+      const part = stops.slice(a, a + GMAP_STOPS), mid = part.slice(0, -1).map(pt).join("%7C"), from = a ? stops[a - 1] : RT.start;
+      const url = `https://www.google.com/maps/dir/?api=1&origin=${pt(from)}&destination=${pt(part[part.length - 1])}${mid ? "&waypoints=" + mid : ""}`;
+      out.push(`<a href="${url}" target="_blank" rel="noopener noreferrer">${stops.length > GMAP_STOPS ? `Chặng ${fmt(a + 1)}–${fmt(a + part.length)}` : "Mở chỉ đường trên Google Maps"}</a>`);
+    }
+    return `<div class="gmap-links">${out.join("")}</div>`;
+  }
+  function drawRoute() {
+    if (!rtLayer) rtLayer = L.layerGroup().addTo(map);
+    rtLayer.clearLayers();
+    const pts = [RT.start].concat(RT.stops.map((i) => S.wm[i])).map((p) => [p.lat, p.lng]);
+    L.polyline(pts, { color: "#0b6bcb", weight: 3, dashArray: "6 6", interactive: false }).addTo(rtLayer);
+    L.marker(pts[0], { icon: numIcon("A", "start"), keyboard: false }).bindTooltip("Điểm xuất phát").addTo(rtLayer);
+    RT.stops.forEach((i, x) => L.marker(pts[x + 1], { icon: numIcon(x + 1), keyboard: false }).bindTooltip(() => wmInfo(i)).on("click", () => select(i)).addTo(rtLayer));
+    map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 15 });
+    const box = $("#rt-result");
+    box.hidden = false;
+    box.innerHTML = `<p><b>${fmt(RT.stops.length)} cửa hàng · khoảng ${fmt(RT.total, 1)} km đường thẳng.</b> `
+      + (RT.exact ? "Thứ tự ngắn nhất theo đường thẳng." : "Thứ tự gần ngắn nhất theo đường thẳng (nhiều điểm nên không thử hết mọi cách).")
+      + ` Đường đi thật thường dài hơn, xem khi mở Google Maps.</p>${gmapDirLinks()}`
+      + `<div class="table-wrap"><table><thead><tr><th>#</th><th>Mã CH</th><th>Tên CH</th><th>Quận</th><th>Tỉnh</th><th>Địa chỉ</th><th class="num">Từ điểm trước (km)</th></tr></thead><tbody>`
+      + RT.stops.map((i, x) => { const w = S.wm[i]; return `<tr><td>${x + 1}</td><td>${esc(w.ma)}</td><td>${esc(w.ten)}</td><td>${esc(w.quan === "-" ? "" : w.quan)}</td><td>${esc(w.tinh)}</td><td class="addr">${esc(w.dia_chi)}</td><td class="num">${fmt(RT.legs[x], 2)}</td></tr>`; }).join("")
+      + `</tbody></table></div>`;
+  }
 
   // ---------- Tổng quan ----------
   function renderOverview() {
@@ -243,7 +322,7 @@
     $("#k-nbhx").textContent = fmt(bScope.length);
     const byComp = {}; bScope.forEach((j) => { const c = S.bhx[j].chain; byComp[c] = (byComp[c] || 0) + 1; });
     $("#k-nbhx-sub").textContent = (S.chains.size > 1 ? Object.entries(byComp).map(([c, k]) => `${chainName(c)} ${fmt(k)}`).join(" · ") + " · " : "")
-      + (S.tinh ? `trong ${provName(S.tinh)}` : regionName() ? `trong ${regionName()}` : "cả nước, đang mở");
+      + (S.quan ? `trong ${$("#quan").selectedOptions[0].text}` : S.tinh ? `trong ${provName(S.tinh)}` : regionName() ? `trong ${regionName()}` : "cả nước, đang mở");
     // Pressure = số đối thủ ÷ số WM, theo tỉnh và chuỗi; bỏ qua Khu vực vì đối thủ không có Urban/Rural. Không phụ thuộc R.
     const nPress = S.wm.filter((w) => inProv(w) && pressOk(w)).length;
     $("#k-press").textContent = nPress ? pct(bScope.length / nPress) : "–";
@@ -272,7 +351,7 @@
     return scope.filter((i) => hit(q, S.wm[i].ma, S.wm[i].ten, S.wm[i].dia_chi)).map((i) => {
       const w = S.wm[i], n = countIn(S.pairsBy[i], S.R), chains = new Set();
       for (let k = 0; k < n; k++) chains.add(S.bhx[S.pairsBy[i][k][0]].chain);
-      return { i, w, ma: w.ma, ten: w.ten, chuoi: w.chuoi, khu_vuc: w.khu_vuc, tinh: w.tinh, n, near: S.near[i], pct: Math.min(n, N) / N, top: S.topBy[i].slice(0, N), nChains: chains.size };
+      return { i, w, ma: w.ma, ten: w.ten, chuoi: w.chuoi, khu_vuc: w.khu_vuc, tinh: w.tinh, quan: w.quan === "-" ? "" : w.quan, n, near: S.near[i], pct: Math.min(n, N) / N, top: S.topBy[i].slice(0, N), nChains: chains.size };
     });
   }
   const WM_PAGE = 100;
@@ -282,8 +361,8 @@
   function renderWmTable(scope) {
     const rows = wmRows(scope).sort((a, b) => (a[S.sortK] > b[S.sortK] ? 1 : a[S.sortK] < b[S.sortK] ? -1 : 0) * S.sortDir), N = topN(), L = esc(lab());
     // Chia trang cho trình duyệt đỡ nặng (bớt dòng nếu N rất lớn), file Xuất WM vẫn đủ.
-    const size = Math.max(1, Math.min(WM_PAGE, Math.floor(TABLE_CELLS / (9 + N)))), pages = Math.max(1, Math.ceil(rows.length / size)), totalChains = activeChains();
-    const key = [S.mien, S.vung, S.tinh, S.chuoi, S.khu, S.q, S.sortK, S.sortDir].join("|");
+    const size = Math.max(1, Math.min(WM_PAGE, Math.floor(TABLE_CELLS / (10 + N)))), pages = Math.max(1, Math.ceil(rows.length / size)), totalChains = activeChains();
+    const key = [filterKey(), S.q, S.sortK, S.sortDir].join("|");
     if (key !== wmPageKey) { wmPageKey = key; wmPage = 0; }                 // đổi lọc hoặc sắp xếp → về trang đầu
     if (wmJump) { wmJump = false; const at = rows.findIndex((r) => r.i === S.sel); if (at >= 0) wmPage = Math.floor(at / size); }   // chọn WM trên bản đồ → tới trang có dòng đó
     wmPage = Math.min(wmPage, pages - 1);
@@ -294,18 +373,18 @@
     $("#wm-hint").innerHTML = S.sel != null
       ? `Đang xem WM <b>${esc(S.wm[S.sel].ma)}</b> trên bản đồ · <button class="link" id="clear-sel">bỏ chọn</button>`
       : `Bấm 1 dòng để xem cửa hàng đó trên bản đồ. Khoảng cách tô đậm: đối thủ nằm trong bán kính ${fmt(S.R, S.R % 1 ? 1 : 0)} km. Cột % = trong ${fmt(N)} đối thủ gần nhất, bao nhiêu % nằm trong bán kính.${pages > 1 ? ` Bảng chia trang; bấm Xuất WM để lấy đủ ${fmt(rows.length)} dòng.` : ""}`;
-    $("#t-wm thead").innerHTML = `<tr><th data-k="ma">Mã CH</th><th data-k="ten">Tên CH</th><th data-k="chuoi">Chuỗi</th><th data-k="khu_vuc">Khu vực</th><th>Địa chỉ</th><th data-k="tinh">Tỉnh</th>`
+    $("#t-wm thead").innerHTML = `<tr><th data-k="ma">Mã CH</th><th data-k="ten">Tên CH</th><th data-k="chuoi">Chuỗi</th><th data-k="khu_vuc">Khu vực</th><th>Địa chỉ</th><th data-k="tinh">Tỉnh</th><th data-k="quan">Quận</th>`
       + `<th data-k="n" class="num">${L} trong R</th><th data-k="pct">% top ${fmt(N)} trong R</th><th data-k="nChains" class="num" title="Trong các chuỗi đối thủ đang bật, bao nhiêu chuỗi có cửa hàng trong bán kính R">Số chuỗi trong R</th>`
       + Array.from({ length: N }, (_, k) => `<th${k ? "" : ' data-k="near"'}>${L} #${k + 1}</th>`).join("") + `</tr>`;
     $("#t-wm tbody").innerHTML = shown.map((r) =>
-      `<tr data-i="${r.i}"${r.i === S.sel ? ' class="sel"' : ""}><td>${esc(r.ma)}</td><td>${esc(r.ten)}</td><td>${esc(r.chuoi)}</td><td>${esc(r.khu_vuc)}</td><td class="addr">${esc(r.w.dia_chi)}</td><td>${esc(r.tinh)}</td>`
+      `<tr data-i="${r.i}"${r.i === S.sel ? ' class="sel"' : ""}><td>${esc(r.ma)}</td><td>${esc(r.ten)}</td><td>${esc(r.chuoi)}</td><td>${esc(r.khu_vuc)}</td><td class="addr">${esc(r.w.dia_chi)}</td><td>${esc(r.tinh)}</td><td>${esc(r.quan)}</td>`
       + `<td class="num">${r.n}</td><td><div class="pbar"><div class="pbar-track"><div class="pbar-fill" style="width:${r.pct * 100}%"></div></div><span>${fmt(r.pct * 100, 0)}%</span></div></td><td class="num">${r.nChains}/${totalChains}</td>`
       + Array.from({ length: N }, (_, k) => {
         const t = r.top[k]; if (!t) return "<td></td>";
         const b = S.bhx[t[0]];
         return `<td class="top ${t[1] <= S.R ? "in" : "out"}" title="${esc(b.dia_chi)}"><b>${fmt(t[1], 2)} km</b> <small>${esc(storeShort(b))}</small></td>`;
       }).join("") + `</tr>`).join("")
-      || `<tr><td colspan="${9 + N}" class="muted">Chưa có WM trong bộ lọc (chưa tải file WM+ lên, hoặc file đã tự xoá sau 48 giờ).</td></tr>`;
+      || `<tr><td colspan="${10 + N}" class="muted">Chưa có WM trong bộ lọc (chưa tải file WM+ lên, hoặc file đã tự xoá sau 48 giờ).</td></tr>`;
   }
   function bhxRows() {
     const nb = bhxNearest();
@@ -363,7 +442,9 @@
     const s = kind === "wm" ? S.wm[k] : S.bhx[k];
     if (kind === "wm" && !wmAttrOk(s)) { S.chuoi = S.khu = ""; $("#chuoi").value = $("#khu").value = ""; }
     if (!inVung(s)) clearRegion();
-    if (!inProv(s)) setProv(provKey(s.tinh));
+    const qOut = !inQuan(s);
+    if (qOut) { S.quan = ""; fillQuan(); }
+    if (!inProv(s)) setProv(provKey(s.tinh)); else if (qOut && kind !== "wm") renderOverview();
     if (kind === "wm") { S.sel = null; select(k); }
     map.setView([s.lat, s.lng], 16);
     L.popup().setLatLng([s.lat, s.lng]).setContent(kind === "wm" ? wmInfo(k) + gmapLinks(s) : bhxInfo(k)).openOn(map);
@@ -426,7 +507,7 @@
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
-  const fileTag = () => [S.chains.size === 1 ? [...S.chains][0].toLowerCase() : "nhieu_chuoi", ...[S.mien, S.vung].filter(Boolean).map((v) => (v === "-" ? "chua_ro" : plain(v).replace(/[^a-z0-9]+/g, "_"))), S.tinh || (S.mien || S.vung ? "" : "tat_ca_tinh"), S.chuoi && S.chuoi.replace("+", "plus"), S.khu && (S.khu === "-" ? "chua_phan_loai" : S.khu)].filter(Boolean).join("_") + `_R${S.R}km`;
+  const fileTag = () => [S.chains.size === 1 ? [...S.chains][0].toLowerCase() : "nhieu_chuoi", ...[S.mien, S.vung].filter(Boolean).map((v) => (v === "-" ? "chua_ro" : plain(v).replace(/[^a-z0-9]+/g, "_"))), S.tinh || (S.mien || S.vung ? "" : "tat_ca_tinh"), S.quan && (S.quan === "-" ? "chua_ro_quan" : plain(S.quan.split("|")[1]).replace(/[^a-z0-9]+/g, "_")), S.chuoi && S.chuoi.replace("+", "plus"), S.khu && (S.khu === "-" ? "chua_phan_loai" : S.khu)].filter(Boolean).join("_") + `_R${S.R}km`;
 
   // ---------- Thay đổi BHX ----------
   let CH = [];
@@ -501,9 +582,9 @@
   }
   async function loadData(preSnap, preChanges) {
     const snap = preSnap || await API.getSnapshot();
-    S.wm = snap.wm.map((w) => ({ ...w, chuoi: w.chuoi || "WM+", khu_vuc: w.khu_vuc || "", dia_chi: w.dia_chi || "", vung: w.vung || "-", mien: w.mien || "-" }));
+    S.wm = snap.wm.map((w) => ({ ...w, chuoi: w.chuoi || "WM+", khu_vuc: w.khu_vuc || "", dia_chi: w.dia_chi || "", vung: w.vung || "-", mien: w.mien || "-", quan: w.quan || "-" }));
     S.all = snap.bhx.map((b) => ({ ...b, chain: "BHX" })).concat(snap.comp || []);
-    buildRegions();
+    buildRegions(); clearRoute(); S.quan = "";
     S.bhx = S.all.filter((b) => S.chains.has(b.chain)); S.sel = null; S.tinh = ""; $("#tinh-q").value = ""; clearRegion();
     try { S.compStatus = JSON.parse(snap.compStatus || "{}"); } catch (_) { S.compStatus = {}; }
     const left = snap.wmExpires ? (snap.wmExpires - Date.now()) / 3600e3 : 0;
@@ -511,7 +592,7 @@
       + (snap.wmExpires ? `, tự xoá ${snap.wmExpires.toLocaleString("vi-VN")} — còn ${fmt(Math.max(left, 0), 0)} giờ` : "")
       + `) · ${fmt(snap.bhx.length)} BHX, cập nhật ${snap.bhxUpdated}`
       + ((snap.comp || []).length ? ` · ${fmt(snap.comp.length)} cửa hàng chuỗi khác, cập nhật ${snap.compUpdated}` : "");
-    computeAll(); fillProvinces();
+    computeAll(); fillProvinces(); fillQuan();
     buildBhxAll(); buildWmMarkers(); renderOverview(); fitScope();
     if (!S.wm.length && !S.all.length) $("#snap-info").textContent = "Chưa có dữ liệu WM+ (chưa upload hoặc đã tự xoá sau 48 giờ) — Admin vào tab WM+ (upload) để tải file lên.";
     loadChanges(preChanges);
@@ -537,7 +618,8 @@
       + (p.mapping.chuoi === undefined ? ` · <span class="muted">không có cột Chuỗi → tất cả là ${esc($("#up-chuoi").value)}</span>` : "")
       + (p.mapping.khu_vuc === undefined ? ` · <span class="muted">không có cột Khu vực → để trống</span>` : "")
       + (p.mapping.mien === undefined ? ` · <span class="err">không có cột Miền → không lọc được theo miền</span>` : "")
-      + (p.mapping.vung === undefined ? ` · <span class="err">không có cột Vùng → không lọc được theo vùng</span>` : "");
+      + (p.mapping.vung === undefined ? ` · <span class="err">không có cột Vùng → không lọc được theo vùng</span>` : "")
+      + (p.mapping.quan === undefined ? ` · <span class="err">không có cột Quận → không lọc được theo quận</span>` : "");
     const v = WMUpload.validate(p, $("#up-chuoi").value), d = WMUpload.diff(S.wm, v.ok);
     UP.valid = v.ok; UP.diff = d;
     const cnt = (f) => v.ok.filter(f).length;
@@ -576,7 +658,7 @@
     if (!confirm(`Lưu ${fmt(n)} WM thành phiên bản mới (thay toàn bộ danh sách cũ)?\nThêm ${d.added.length} · bỏ ${d.removed.length} · dời ${d.moved.length}.\nDữ liệu tự xoá sau 48 giờ.`)) return;
     $("#up-apply").disabled = true; $("#up-msg").textContent = "Đang lưu…";
     try {
-      const r = await API.publishWm(UP.valid.map(({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi, vung, mien }) => ({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi, vung, mien })));
+      const r = await API.publishWm(UP.valid.map(({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi, vung, mien, quan }) => ({ ma, ten, tinh, lat, lng, khu_vuc, chuoi, dia_chi, vung, mien, quan })));
       $("#up-msg").textContent = `Đã lưu ${r.version}: ${fmt(r.rows)} WM.`;
       UP = null; $("#up-file").value = "";
       await loadData(); renderVersions();
@@ -647,6 +729,25 @@
   });
   $("#mien").addEventListener("change", (e) => { S.mien = e.target.value; regionChanged(); });
   $("#vung").addEventListener("change", (e) => { S.vung = e.target.value; regionChanged(); });
+  $("#quan").addEventListener("change", (e) => { S.quan = e.target.value; S.sel = null; renderOverview(); fitScope(); });
+  $("#rt-clear").addEventListener("click", clearRoute);
+  $("#rt-go").addEventListener("click", () => {
+    const from = $("#rt-from").value, msg = $("#rt-msg");
+    stopPick();
+    if (from === "sel") {
+      if (S.sel == null) { msg.textContent = "Bấm chọn 1 WM trong bảng hoặc trên bản đồ trước."; return; }
+      buildRoute(S.wm[S.sel], S.sel);
+    } else if (from === "click") {
+      msg.textContent = "Bấm vào điểm xuất phát trên bản đồ.";
+      rtPick = (e) => buildRoute({ lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) });
+      map.once("click", rtPick);
+      $("#map-card").scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      msg.textContent = "Đang lấy vị trí của bạn…";
+      navigator.geolocation.getCurrentPosition((p) => buildRoute({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }),
+        () => (msg.textContent = "Không lấy được vị trí. Hãy cho phép trình duyệt dùng vị trí hoặc chọn cách xuất phát khác."), { timeout: 10000 });
+    }
+  });
   $("#chuoi").addEventListener("change", (e) => { S.chuoi = e.target.value; S.sel = null; renderOverview(); fitScope(); });
   $("#khu").addEventListener("change", (e) => { S.khu = e.target.value; S.sel = null; renderOverview(); fitScope(); });
   $("#q").addEventListener("input", (e) => { S.q = plain(e.target.value.trim()); renderWmTable(scopeIdx()); $("#bhx-count").textContent = `(${fmt(bhxRows().length)})`; });
@@ -687,8 +788,8 @@
   $("#exp-wm").addEventListener("click", () => {
     const N = topN(), blocks = [];
     for (let k = 1; k <= N; k++) blocks.push(`Chain_${k}`, `Code_${k}`, `Name_${k}`, `Address_${k}`, `Distance_${k} (km)`);
-    downloadCsv(`wm_top${N}_${fileTag()}.csv`, ["Mã CH", "Tên CH", "Chuỗi", "Khu vực", "Địa chỉ", "Tỉnh", "Lat WM", "Lng WM", "Bán kính (km)", "Số đối thủ trong R", `% top ${N} trong R`, "Số chuỗi trong R", "Số chuỗi đang bật", ...blocks],
-      wmRows(scopeIdx()).map((r) => [r.ma, r.ten, r.chuoi, r.khu_vuc, r.w.dia_chi, r.tinh, r.w.lat, r.w.lng, S.R, r.n, Math.round(r.pct * 100) + "%", r.nChains, activeChains(),
+    downloadCsv(`wm_top${N}_${fileTag()}.csv`, ["Mã CH", "Tên CH", "Chuỗi", "Khu vực", "Địa chỉ", "Tỉnh", "Quận", "Lat WM", "Lng WM", "Bán kính (km)", "Số đối thủ trong R", `% top ${N} trong R`, "Số chuỗi trong R", "Số chuỗi đang bật", ...blocks],
+      wmRows(scopeIdx()).map((r) => [r.ma, r.ten, r.chuoi, r.khu_vuc, r.w.dia_chi, r.tinh, r.quan, r.w.lat, r.w.lng, S.R, r.n, Math.round(r.pct * 100) + "%", r.nChains, activeChains(),
         ...Array.from({ length: N }, (_, k) => { const t = r.top[k], b = t && S.bhx[t[0]]; return b ? [chainName(b.chain), b.ma, b.ten || "", b.dia_chi, t[1]] : ["", "", "", "", ""]; }).flat()]));
   });
   $("#exp-bhx").addEventListener("click", () => downloadCsv(`doithu_${fileTag()}.csv`, ["Đối thủ", "Mã", "Tên", "Địa chỉ", "Tỉnh", "Lat", "Lng", "Bán kính (km)", "Số WM trong R", "WM gần nhất", "Chuỗi WM gần nhất", "Khoảng cách WM gần nhất (km)"],

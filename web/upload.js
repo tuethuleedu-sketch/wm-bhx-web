@@ -13,8 +13,9 @@ window.WMUpload = (function () {
     dia_chi: ["Địa chỉ", "Địa chỉ CH", "Dia chi", "Address"],
     vung: ["Vùng", "Vung", "Region", "Zone"],
     mien: ["Miền", "Mien", "Vùng miền"],
+    quan: ["Quận/Huyện", "Quận", "Huyện", "Quận huyện", "Quận/Huyện cũ", "District"],
   };
-  const OPTIONAL = new Set(["ten", "khu_vuc", "chuoi", "dia_chi", "vung", "mien"]);
+  const OPTIONAL = new Set(["ten", "khu_vuc", "chuoi", "dia_chi", "vung", "mien", "quan"]);
   const plain = (s) => norm(s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase();
   // "Thành thị"/"urban"/"nội thành" → Urban; "Nông thôn"/"rural"/"ngoại thành" → Rural; khác giữ nguyên
   function khuVuc(v) {
@@ -84,7 +85,7 @@ window.WMUpload = (function () {
       const ma = norm(r[p.mapping.ma]);
       const rec = { line, ma, ten: col(r, "ten") || ma,
         tinh: norm(r[p.mapping.tinh]), lat: num(r[p.mapping.lat]), lng: num(r[p.mapping.lng]),
-        khu_vuc: khuVuc(col(r, "khu_vuc")), chuoi: chuoi(col(r, "chuoi"), dfltChuoi), dia_chi: col(r, "dia_chi").slice(0, 300), vung: col(r, "vung").slice(0, 50), mien: col(r, "mien").slice(0, 50) };
+        khu_vuc: khuVuc(col(r, "khu_vuc")), chuoi: chuoi(col(r, "chuoi"), dfltChuoi), dia_chi: col(r, "dia_chi").slice(0, 300), vung: col(r, "vung").slice(0, 50), mien: col(r, "mien").slice(0, 50), quan: col(r, "quan").slice(0, 50) };
       let why = "";
       if (!ma) why = "thiếu mã";
       else if (!rec.chuoi) why = `chuỗi "${col(r, "chuoi")}" không phải WM+/WMT`;

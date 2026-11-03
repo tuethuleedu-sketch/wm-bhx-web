@@ -31,7 +31,7 @@
       const vung = p === 8 ? "" : p < 2 ? "Vùng 1" : p < 3 || p === 4 ? "Vùng 2" : p === 3 ? (g2 < 0 ? "Vùng 1" : "Vùng 3") : "Vùng 3";
       wm.push({ ma, ten: chuoi + " demo " + ma, tinh, lat: +(lat + g1 * sd).toFixed(6), lng: +(lng + g2 * sd).toFixed(6),
         khu_vuc: Math.hypot(g1, g2) < 1 ? "Urban" : "Rural", chuoi,
-        vung, mien: !vung ? "" : vung === "Vùng 3" ? "Miền Y" : "Miền X",
+        vung, mien: !vung ? "" : vung === "Vùng 3" ? "Miền Y" : "Miền X", quan: !vung ? "" : g1 < 0 ? "Quận Nam" : g2 < 0 ? "Quận Tây" : "Quận Đông",
         dia_chi: `${Math.floor(rand() * 300) + 1} ${STREETS[Math.floor(rand() * STREETS.length)]}, ${tinh}` });
     }
     for (let i = 0; i < Math.round(n * 2.3); i++) {
