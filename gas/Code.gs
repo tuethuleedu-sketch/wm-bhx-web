@@ -2,7 +2,7 @@
  * WM+ ↔ BHX — backend Google Apps Script (Web App, gắn với 1 Google Sheet làm database).
  *
  * Triển khai: Deploy → Web app · Execute as: Me · Who has access: Anyone.
- * "Anyone" chỉ là ai cũng GỌI được URL; mọi dữ liệu đều cần phiên đăng nhập OTP (xem route_).
+ * "Anyone" chỉ là ai cũng GỌI được URL; mọi dữ liệu đều cần phiên đăng nhập bằng mật khẩu (xem route_).
  * KHÔNG chia sẻ Google Sheet cho ai — người dùng chỉ vào qua web.
  *
  * Các tab: users · settings · wm_versions · bhx_stores · bhx_changes · access_log
@@ -10,6 +10,7 @@
  * (xoá cả file → không còn lịch sử phiên bản để khôi phục).
  *
  * Chạy 1 lần trong editor: setup()  — tạo tab, Admin đầu tiên (chủ Sheet), SYNC_SECRET, lịch chạy hằng giờ.
+ * Admin chưa có / quên mật khẩu: chạy taoMatKhauAdmin() trong editor để lấy mật khẩu tạm.
  */
 
 // ID của Google Sheet làm database (đoạn giữa /d/ và /edit trong link Sheet).
@@ -18,11 +19,12 @@ const SHEET_ID = '';
 
 const CFG = {
   TZ: 'Asia/Ho_Chi_Minh',
-  OTP_TTL_S: 600,            // mã OTP sống 10 phút
-  OTP_MAX_TRY: 5,            // nhập sai 5 lần → huỷ mã
-  OTP_MIN_GAP_S: 60,         // 1 email chỉ xin mã 1 lần/phút
-  OTP_MAX_PER_DAY: 80,       // trần toàn hệ thống/ngày (Gmail cá nhân gửi ~100 mail/ngày qua Apps Script)
-  SESSION_DAYS: 30,          // phiên đăng nhập 30 ngày, tự gia hạn khi còn dùng (lưu ở Script Properties)
+  PW_MIN_LEN: 8,             // mật khẩu tối thiểu 8 ký tự
+  PW_ITER: 2000,             // số vòng băm, làm chậm việc dò mật khẩu nếu lộ Script Properties
+  PW_MAX_TRY: 5,             // nhập sai 5 lần → khoá email đó
+  PW_LOCK_S: 900,            // khoá 15 phút
+  PW_TEMP_DAYS: 7,           // mật khẩu tạm hết hạn sau 7 ngày
+  SESSION_DAYS: 30,         // phiên đăng nhập 30 ngày, tự gia hạn khi còn dùng (lưu ở Script Properties)
   WM_TTL_H: 48,              // WM+ tự xoá sau 48 giờ
   MOVE_KM: 0.05,             // dời > 50 m mới tính là dời vị trí
   MAX_CLOSE_RATIO: 0.30,     // guard đồng bộ BHX
@@ -64,8 +66,8 @@ function out_(o) {
 function route_(req) {
   const a = String(req.action || '');
   // Không cần đăng nhập
-  if (a === 'requestOtp') return requestOtp_(req.email);
-  if (a === 'verifyOtp') return verifyOtp_(req.email, req.code);
+  if (a === 'login') return login_(req.email, req.password);
+  if (a === 'changePassword') return changePassword_(req.email, req.password, req.newPassword);
   if (a === 'syncBhx') return syncBhx_(req.secret, req.stores, !!req.dryRun);
   // Cần đăng nhập
   const u = session_(req.token);
@@ -75,13 +77,14 @@ function route_(req) {
   if (a === 'changes') return changes_();
   if (a === 'settings') return settings_();
   // Chỉ Admin
-  if (['versions', 'publishWm', 'listUsers', 'addUser', 'removeUser', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
+  if (['versions', 'publishWm', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
     if (u.role !== 'admin') throw new Error('Chỉ Admin được làm thao tác này');
     if (a === 'versions') return versions_();
     if (a === 'publishWm') return publishWm_(u, req.rows);
     if (a === 'listUsers') return listUsers_();
     if (a === 'addUser') return addUser_(u, req.email, req.role);
     if (a === 'removeUser') return removeUser_(u, req.email);
+    if (a === 'resetPassword') return resetPassword_(u, req.email);
     if (a === 'setSetting') return setSetting_(req.key, req.value);
     if (a === 'accessLog') return accessLog_();
   }
@@ -143,52 +146,100 @@ function normEmail_(e) {
 }
 function err_(msg, code) { const e = new Error(msg); e.code = code; return e; }
 
-// ───────────────────────── Đăng nhập OTP ─────────────────────────
+// ───────────────────────── Đăng nhập bằng mật khẩu ─────────────────────────
 function roleOf_(email) {
   const u = readRows_('users').filter(function (r) { return String(r.email).toLowerCase() === email; })[0];
   return u ? String(u.role) : null;
 }
 
-// Luôn trả cùng 1 câu → không dò được email nào có trong danh sách. Chỉ email được cấp quyền mới nhận mail.
-function requestOtp_(emailRaw) {
-  const email = normEmail_(emailRaw), cache = CacheService.getScriptCache();
-  if (cache.get('otpgap:' + email)) throw new Error('Vừa gửi mã — đợi 1 phút rồi thử lại');
-  cache.put('otpgap:' + email, '1', CFG.OTP_MIN_GAP_S);
-  if (!roleOf_(email)) { log_(email, 'denied', true); return { sent: true }; }
-
-  const props = PropertiesService.getScriptProperties(), dayKey = 'otpcount:' + todayVN_();
-  const n = Number(props.getProperty(dayKey) || 0);
-  if (n >= CFG.OTP_MAX_PER_DAY) throw new Error('Hệ thống đã gửi quá nhiều mã hôm nay — thử lại ngày mai');
-  props.setProperty(dayKey, String(n + 1));
-
-  const code = String(parseInt(Utilities.getUuid().replace(/-/g, '').slice(0, 12), 16) % 1000000).padStart(6, '0');
-  cache.put('otp:' + email, JSON.stringify({ h: sha_(email + ':' + code), n: 0 }), CFG.OTP_TTL_S);
-  MailApp.sendEmail({
-    to: email,
-    subject: 'Mã đăng nhập WM+ ↔ BHX: ' + code,
-    body: 'Mã đăng nhập của bạn: ' + code + '\nMã hết hạn sau 10 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.',
-    htmlBody: '<p>Mã đăng nhập của bạn: <b style="font-size:20px">' + code + '</b></p><p>Mã hết hạn sau 10 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>',
-  });
-  return { sent: true };
+function pwHash_(pw, salt) {
+  let h = sha_(salt + ':' + pw);
+  for (let i = 0; i < CFG.PW_ITER; i++) h = sha_(salt + h);
+  return h;
+}
+// Lưu ở Script Properties, không để trong Sheet. Chỉ lưu muối + hash, t = hạn của mật khẩu tạm.
+function setPassword_(email, pw, tempUntil) {
+  const salt = Utilities.getUuid().replace(/-/g, '');
+  const rec = { s: salt, h: pwHash_(pw, salt) };
+  if (tempUntil) rec.t = tempUntil;
+  PropertiesService.getScriptProperties().setProperty('pw:' + email, JSON.stringify(rec));
+}
+function tempPassword_(email) {
+  const pw = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+  setPassword_(email, pw, Date.now() + CFG.PW_TEMP_DAYS * 864e5);
+  CacheService.getScriptCache().remove('pwfail:' + email);
+  return pw;
 }
 
-function verifyOtp_(emailRaw, codeRaw) {
-  const email = normEmail_(emailRaw), code = String(codeRaw || '').trim(), cache = CacheService.getScriptCache();
-  const raw = cache.get('otp:' + email);
-  if (!raw) throw new Error('Mã không đúng hoặc đã hết hạn. Bấm gửi lại mã.');
-  const st = JSON.parse(raw);
-  if (st.h !== sha_(email + ':' + code)) {
-    st.n += 1;
-    if (st.n >= CFG.OTP_MAX_TRY) cache.remove('otp:' + email); else cache.put('otp:' + email, JSON.stringify(st), CFG.OTP_TTL_S);
-    throw new Error('Mã không đúng hoặc đã hết hạn. Bấm gửi lại mã.');
+// Luôn báo cùng 1 câu và băm cùng số vòng → không dò được email nào có trong danh sách.
+function checkPassword_(emailRaw, pwRaw) {
+  const email = normEmail_(emailRaw), pw = String(pwRaw || '').slice(0, 200), cache = CacheService.getScriptCache();
+  const fails = Number(cache.get('pwfail:' + email) || 0);
+  if (fails >= CFG.PW_MAX_TRY) throw new Error('Sai quá nhiều lần — đợi 15 phút rồi thử lại');
+  let rec = null;
+  try { rec = JSON.parse(PropertiesService.getScriptProperties().getProperty('pw:' + email) || 'null'); } catch (_) {}
+  const role = roleOf_(email), hash = pwHash_(pw, rec ? rec.s : email);
+  if (!rec || !role || rec.h !== hash || (rec.t && rec.t < Date.now())) {
+    cache.put('pwfail:' + email, String(fails + 1), CFG.PW_LOCK_S);
+    log_(email, role ? 'login_fail' : 'denied', true);
+    throw new Error('Email hoặc mật khẩu không đúng.');
   }
-  cache.remove('otp:' + email);
-  const role = roleOf_(email);
-  if (!role) { log_(email, 'denied'); throw new Error('Email này chưa được Admin cấp quyền truy cập.'); }
+  cache.remove('pwfail:' + email);
+  return { email: email, role: role, temp: !!rec.t };
+}
+
+function newSession_(email, role) {
   const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
   putSession_(sha_(token), email);                                  // chỉ lưu hash của token
-  log_(email, 'login');
   return { token: token, email: email, role: role };
+}
+
+// Mật khẩu tạm chưa mở phiên: phải đặt mật khẩu mới rồi mới vào được.
+function login_(emailRaw, pw) {
+  const c = checkPassword_(emailRaw, pw);
+  if (c.temp) return { mustChange: true, email: c.email };
+  log_(c.email, 'login');
+  return newSession_(c.email, c.role);
+}
+
+function changePassword_(emailRaw, pw, newPwRaw) {
+  const c = checkPassword_(emailRaw, pw), newPw = String(newPwRaw || '');
+  if (newPw.length < CFG.PW_MIN_LEN || newPw.length > 200) throw new Error('Mật khẩu mới cần từ ' + CFG.PW_MIN_LEN + ' đến 200 ký tự');
+  if (newPw === String(pw)) throw new Error('Mật khẩu mới phải khác mật khẩu cũ');
+  setPassword_(c.email, newPw);
+  endSessions_(c.email);                                            // đăng xuất các máy khác
+  log_(c.email, 'pw_change');
+  return newSession_(c.email, c.role);
+}
+
+function resetPassword_(u, emailRaw) {
+  const email = normEmail_(emailRaw);
+  if (email === u.email) throw new Error('Mật khẩu của bạn đổi ở nút "Đổi mật khẩu" trên cùng');
+  if (!roleOf_(email)) throw new Error('Email này chưa được cấp quyền');
+  const pw = tempPassword_(email);
+  endSessions_(email);
+  log_(email, 'pw_reset');
+  return { tempPassword: pw };
+}
+
+// Chạy trong editor khi Admin chưa có hoặc quên mật khẩu. Mật khẩu tạm chỉ dùng để đặt mật khẩu mới.
+function taoMatKhauAdmin() {
+  const owner = Session.getEffectiveUser().getEmail().toLowerCase();
+  if (roleOf_(owner) !== 'admin') throw new Error(owner + ' không phải Admin');
+  const pw = tempPassword_(owner);
+  endSessions_(owner);
+  log_(owner, 'pw_reset');
+  Logger.log('Mật khẩu tạm của %s (hạn %s ngày, KHÔNG gửi cho ai): %s', owner, CFG.PW_TEMP_DAYS, pw);
+}
+
+function endSessions_(email) {
+  const props = PropertiesService.getScriptProperties(), all = props.getProperties();
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('sess:') !== 0) return;
+    let s = null;
+    try { s = JSON.parse(all[k]); } catch (_) {}
+    if (s && s.e === email) props.deleteProperty(k);
+  });
 }
 
 function putSession_(h, email) {
@@ -746,7 +797,7 @@ function addUser_(u, emailRaw, role) {
   return withLock_(function () {
     if (roleOf_(email)) throw new Error('Email đã có trong danh sách');
     append_('users', [{ email: email, role: role, added_at: nowIso_(), added_by: u.email }]);
-    return true;
+    return { tempPassword: tempPassword_(email) };
   });
 }
 function removeUser_(u, emailRaw) {
@@ -756,6 +807,8 @@ function removeUser_(u, emailRaw) {
     const rows = readRows_('users'), left = rows.filter(function (r) { return String(r.email).toLowerCase() !== email; });
     if (!left.some(function (r) { return r.role === 'admin'; })) throw new Error('Phải còn ít nhất 1 Admin');
     writeAll_('users', left);
+    PropertiesService.getScriptProperties().deleteProperty('pw:' + email);
+    endSessions_(email);
     return true;
   });
 }
