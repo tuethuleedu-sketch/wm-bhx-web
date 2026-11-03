@@ -124,5 +124,4 @@
 
   // Gọi Web app như trình duyệt/GitHub Action gọi
   G.gasCall = (body) => JSON.parse(G.doPost({ postData: { contents: typeof body === "string" ? body : JSON.stringify(body) } }).getContent());
-  G.lastOtp = (email) => { const m = [...M.mails].reverse().find((x) => x.to === email); return m && m.subject.match(/(\d{6})$/)[1]; };
 })(window);

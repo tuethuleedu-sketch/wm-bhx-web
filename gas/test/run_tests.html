@@ -16,7 +16,6 @@
   (0, eval)((await (await fetch(src)).text()).replace(/const SHEET_ID\s*=\s*'[^']*'/, "const SHEET_ID=''"));
 
   const call = (action, p = {}) => gasCall({ action, ...p });
-  const login = (email) => { M.cache.delete("otpgap:" + email); call("requestOtp", { email }); return call("verifyOtp", { email, code: lastOtp(email) }).data; };
   const sheetRows = (n) => SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n).getDataRange().getValues().slice(1).filter((r) => r.some((x) => x !== ""));
   const OWNER = "owner@gmail.com";
 
@@ -31,25 +30,55 @@
   const SECRET = M.props.get("SYNC_SECRET");
   check("setup tạo SYNC_SECRET 64 ký tự", SECRET && SECRET.length === 64);
 
-  // ---- OTP ----
-  let r = call("requestOtp", { email: "la@gmail.com" });
-  check("email lạ: trả 'sent' giống hệt (không lộ email nào có quyền)", r.ok && r.data.sent === true);
-  check("email lạ: KHÔNG gửi mail", M.mails.length === 0);
-  r = call("requestOtp", { email: "la@gmail.com" });
-  check("xin mã 2 lần/phút → chặn", !!r.error && /1 phút/.test(r.error));
-  r = call("requestOtp", { email: "  OWNER@gmail.com " });
-  check("email có quyền (viết hoa, có khoảng trắng) → gửi mail", r.ok && M.mails.length === 1 && M.mails[0].to === OWNER);
-  const code = lastOtp(OWNER);
-  for (let i = 0; i < 5; i++) r = call("verifyOtp", { email: OWNER, code: "000000" === code ? "111111" : "000000" });
-  check("nhập sai mã → báo lỗi", !!r.error);
-  r = call("verifyOtp", { email: OWNER, code });
-  check("sai 5 lần → mã bị huỷ, mã đúng cũng không dùng được", !!r.error);
-  r = call("requestOtp", { email: "khong-phai-email" });
-  check("email sai định dạng → lỗi", !!r.error);
+  // ---- Mật khẩu ----
+  const PWREC = (e) => JSON.parse(M.props.get("pw:" + e) || "null");
+  const clearFail = (e) => M.cache.delete("pwfail:" + e);
+  let r = call("login", { email: "la@gmail.com", password: "abcd1234" });
+  check("email lạ: báo cùng 1 câu (không lộ email nào có quyền)", r.error === "Email hoặc mật khẩu không đúng.", r);
+  check("email lạ: ghi nhật ký 'denied'", sheetRows("access_log").some((x) => x[1] === "la@gmail.com" && x[2] === "denied"));
+  r = call("login", { email: OWNER, password: "abcd1234" });
+  check("email có quyền nhưng chưa có mật khẩu: cùng câu báo lỗi", r.error === "Email hoặc mật khẩu không đúng.", r);
+  clearFail(OWNER);
+  r = call("login", { email: "khong-phai-email", password: "x" });
+  check("email sai định dạng → lỗi", /không hợp lệ/.test(r.error));
+  taoMatKhauAdmin();
+  check("taoMatKhauAdmin tạo mật khẩu tạm có hạn 7 ngày", PWREC(OWNER) && Math.abs(PWREC(OWNER).t - Date.now() - 7 * 864e5) < 60e3);
+  const TEMP = tempPassword_(OWNER);
+  check("chỉ lưu muối + hash, không có mật khẩu gốc", ![...M.props.values(), ...M.props.keys()].some((v) => String(v).includes(TEMP)) && !sheetRows("access_log").flat().some((v) => String(v).includes(TEMP)));
+  r = call("login", { email: "  OWNER@gmail.com ", password: TEMP });
+  check("mật khẩu tạm đúng (email viết hoa, có khoảng trắng) → phải đổi, CHƯA có phiên", r.ok && r.data.mustChange === true && !r.data.token, r);
+  check("mật khẩu tạm không mở phiên nào", ![...M.props.keys()].some((k) => k.startsWith("sess:")));
+  r = call("changePassword", { email: OWNER, password: TEMP, newPassword: "ngan" });
+  check("mật khẩu mới quá ngắn → lỗi", /8/.test(r.error), r);
+  r = call("changePassword", { email: OWNER, password: TEMP, newPassword: TEMP });
+  check("mật khẩu mới trùng mật khẩu cũ → lỗi", /khác/.test(r.error), r);
+  r = call("changePassword", { email: OWNER, password: "sai-mat-khau", newPassword: "matkhau-moi-1" });
+  check("đổi mật khẩu với mật khẩu cũ sai → lỗi", /không đúng/.test(r.error), r);
+  clearFail(OWNER);
+  r = call("changePassword", { email: OWNER, password: TEMP, newPassword: "matkhau-moi-1" });
+  check("đặt mật khẩu mới → có phiên", r.ok && r.data.token && r.data.role === "admin", r);
+  r = call("login", { email: OWNER, password: TEMP });
+  check("mật khẩu tạm không dùng lại được", !!r.error);
+  clearFail(OWNER);
+  const PW = "matkhau-moi-1";
+  r = call("login", { email: OWNER, password: "matkhau-sai-2" });
+  check("sai mật khẩu → lỗi, nhật ký 'login_fail'", !!r.error && sheetRows("access_log").some((x) => x[1] === OWNER && x[2] === "login_fail"));
+  for (let i = 0; i < 4; i++) call("login", { email: OWNER, password: "matkhau-sai-2" });
+  r = call("login", { email: OWNER, password: PW });
+  check("sai 5 lần → khoá, mật khẩu đúng cũng không vào được", /15 phút/.test(r.error), r);
+  clearFail(OWNER);
+  const tempUntil = tempPassword_("hethan@gmail.com");
+  check("mật khẩu của email đã hết quyền không vào được", !!call("login", { email: "hethan@gmail.com", password: tempUntil }).error);
+  M.props.delete("pw:hethan@gmail.com");
+  const TEMP2 = tempPassword_(OWNER), recTemp = PWREC(OWNER);
+  recTemp.t = Date.now() - 1000; M.props.set("pw:" + OWNER, JSON.stringify(recTemp));
+  check("mật khẩu tạm quá hạn → không vào được", !!call("login", { email: OWNER, password: TEMP2 }).error);
+  clearFail(OWNER); M.props.delete("pw:" + OWNER);
+  check("không còn gửi email", M.mails.length === 0);
+  [...M.props.keys()].filter((k) => k.startsWith("sess:")).forEach((k) => M.props.delete(k));
+  const login = (email) => { const rec = PWREC(email); if (!rec || rec.t) setPassword_(email, PW); return call("login", { email, password: PW }).data; };
   const admin = login(OWNER);
-  check("đăng nhập đúng mã → có token + role admin", admin && admin.token && admin.token.length === 64 && admin.role === "admin");
-  r = call("verifyOtp", { email: OWNER, code: lastOtp(OWNER) });
-  check("mã OTP chỉ dùng được 1 lần", !!r.error);
+  check("đăng nhập đúng mật khẩu → có token + role admin", admin && admin.token && admin.token.length === 64 && admin.role === "admin");
   check("token chỉ lưu dạng băm (không nằm trong cache/properties)",
     ![...M.cache.keys(), ...M.props.keys(), ...M.props.values()].some((k) => k.includes(admin.token)));
   const sessKeys = () => [...M.props.keys()].filter((k) => k.startsWith("sess:"));
@@ -70,13 +99,26 @@
 
   r = call("addUser", { token: admin.token, email: "Viewer@Gmail.com", role: "viewer" });
   check("admin cấp quyền viewer", r.ok);
+  check("cấp quyền trả mật khẩu tạm, người mới phải đổi", r.data.tempPassword && PWREC("viewer@gmail.com").t > Date.now()
+    && call("login", { email: "viewer@gmail.com", password: r.data.tempPassword }).data.mustChange === true);
   r = call("addUser", { token: admin.token, email: "viewer@gmail.com", role: "viewer" });
   check("cấp trùng email → lỗi", /đã có/.test(r.error));
   r = call("addUser", { token: admin.token, email: "x@gmail.com", role: "superadmin" });
   check("quyền bịa → lỗi", !!r.error);
-  const viewer = login("viewer@gmail.com");
+  let viewer = login("viewer@gmail.com");
   check("viewer đăng nhập", viewer && viewer.role === "viewer");
-  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "setSetting", "addUser", "removeUser"]) {
+  const v2 = login("viewer@gmail.com");
+  r = call("changePassword", { email: "viewer@gmail.com", password: PW, newPassword: "viewer-pw-moi" });
+  check("đổi mật khẩu đăng xuất các phiên cũ", r.ok && call("me", { token: v2.token }).code === "AUTH", r);
+  r = call("resetPassword", { token: admin.token, email: OWNER });
+  check("Admin không tự cấp lại cho chính mình", /Đổi mật khẩu/.test(r.error), r);
+  const v3 = call("login", { email: "viewer@gmail.com", password: "viewer-pw-moi" }).data;
+  r = call("resetPassword", { token: admin.token, email: "viewer@gmail.com" });
+  check("Admin cấp lại mật khẩu: có mật khẩu tạm, phiên cũ bị huỷ, mật khẩu cũ hết hiệu lực", r.ok && r.data.tempPassword && call("me", { token: v3.token }).code === "AUTH"
+    && !!call("login", { email: "viewer@gmail.com", password: "viewer-pw-moi" }).error, r);
+  clearFail("viewer@gmail.com");
+  viewer = login("viewer@gmail.com");
+  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "setSetting", "addUser", "removeUser", "resetPassword"]) {
     r = call(a, { token: viewer.token, email: "a@b.co", role: "admin", rows: [], key: "viewer_can_export", value: false });
     check(`viewer KHÔNG gọi được ${a}`, /Chỉ Admin/.test(r.error), r);
   }
