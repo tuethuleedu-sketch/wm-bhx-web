@@ -9,7 +9,7 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611041536">
+  <link rel="stylesheet" href="style.css?v=202611041604">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -199,7 +199,7 @@
             <span class="small" id="p-job"></span>
           </div>
           <p class="muted small p-note">Giá chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Mỗi lần có thể mất 15–30 phút, cần giữ tab này mở; lỡ đóng tab thì bấm lại để chạy tiếp. Dữ liệu cũ giữ nguyên cho tới khi lấy đủ.</p>
-          <details id="p-setup"><summary>Thiết lập tỉnh và token</summary>
+          <details id="p-setup"><summary>Thiết lập tỉnh và cửa hàng</summary>
             <p class="small" id="p-keys"></p>
             <div class="table-wrap"><table id="t-p-cfg"><thead><tr><th>Tỉnh</th><th>provinceId</th><th>wardId</th><th>storeId</th><th></th></tr></thead><tbody></tbody></table></div>
             <div class="p-actions"><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
@@ -220,7 +220,7 @@
           <label class="inline"><input id="p-promo" type="checkbox"> Chỉ SKU có khuyến mãi</label>
           <span class="muted small" id="p-msg"></span>
         </div>
-        <div class="card" id="p-empty"><h3>Chưa có dữ liệu giá</h3><p class="muted">Admin điền thiết lập tỉnh và token, rồi bấm Cập nhật giá.</p></div>
+        <div class="card" id="p-empty"><h3>Chưa có dữ liệu giá</h3><p class="muted">Admin bấm Cập nhật giá ở trên để lấy giá lần đầu.</p></div>
         <div id="p-report" hidden>
           <p class="card small" id="p-source"></p>
           <p class="err small" id="p-quality" hidden></p>
@@ -320,14 +320,14 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611041536"></script>
-  <script src="demo-data.js?v=202611041536"></script>
-  <script src="gas-api.js?v=202611041536"></script>
-  <script src="upload.js?v=202611041536"></script>
-  <script src="area.js?v=202611041536"></script>
-  <script src="nearby.js?v=202611041536"></script>
-  <script src="price.js?v=202611041536"></script>
-  <script src="bot.js?v=202611041536"></script>
-  <script src="app.js?v=202611041536"></script>
+  <script src="config.js?v=202611041604"></script>
+  <script src="demo-data.js?v=202611041604"></script>
+  <script src="gas-api.js?v=202611041604"></script>
+  <script src="upload.js?v=202611041604"></script>
+  <script src="area.js?v=202611041604"></script>
+  <script src="nearby.js?v=202611041604"></script>
+  <script src="price.js?v=202611041604"></script>
+  <script src="bot.js?v=202611041604"></script>
+  <script src="app.js?v=202611041604"></script>
 </body>
 </html>

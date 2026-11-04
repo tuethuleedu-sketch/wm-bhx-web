@@ -349,8 +349,8 @@ window.WMPrice = (function () {
   }
   function showConfig(c) {
     $("#t-p-cfg tbody").innerHTML = c.provinces.map(cfgRow).join("");
-    $("#p-keys").textContent = c.missing.length ? `Thiếu trong Script Properties của Apps Script: ${c.missing.join(", ")}. Hãy tự nhập ở đó, không nhập token vào trang này.` : "Đã có đủ 7 mục token trong Script Properties. Web không đọc được giá trị token.";
-    if (c.missing.length || c.provinces.some((p) => !p.provinceId || !p.wardId || !p.storeId)) $("#p-setup").open = true;
+    $("#p-keys").textContent = c.missing.length === 7 ? "Không cần token: hệ thống lấy giá như khách chưa đăng nhập, không dùng tài khoản nào." : `Đang có ${7 - c.missing.length}/7 mục BHX_ trong Script Properties. Chỉ nhập ở Apps Script, không nhập vào trang này. Web không đọc được giá trị.`;
+    if (c.provinces.some((p) => !p.provinceId || !p.wardId || !p.storeId)) $("#p-setup").open = true;
     showJob(c.job);
   }
   async function loadAdmin() {
