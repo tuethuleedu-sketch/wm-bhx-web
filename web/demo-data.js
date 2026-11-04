@@ -31,7 +31,7 @@
       const vung = p === 8 ? "" : p < 2 ? "Vùng 1" : p < 3 || p === 4 ? "Vùng 2" : p === 3 ? (g2 < 0 ? "Vùng 1" : "Vùng 3") : "Vùng 3";
       wm.push({ ma, ten: chuoi + " demo " + ma, tinh, lat: +(lat + g1 * sd).toFixed(6), lng: +(lng + g2 * sd).toFixed(6),
         khu_vuc: Math.hypot(g1, g2) < 1 ? "Urban" : "Rural", chuoi,
-        vung, mien: !vung ? "" : vung === "Vùng 3" ? "Miền Y" : "Miền X", quan: !vung ? "" : g1 < 0 ? "Quận Nam" : g2 < 0 ? "Quận Tây" : "Quận Đông",
+        vung, mien: !vung ? "" : vung === "Vùng 3" ? "Miền Y" : "Miền X", quan: !vung ? "" : g1 < 0 ? "Quận Nam" : g2 < 0 ? "Quận Tây" : "Quận Đông", phuong: !vung ? "" : "Phường " + (1 + Math.floor(Math.abs(g1 * 2 + g2) * 2) % 5),
         dia_chi: `${Math.floor(rand() * 300) + 1} ${STREETS[Math.floor(rand() * STREETS.length)]}, ${tinh}` });
     }
     for (let i = 0; i < Math.round(n * 2.3); i++) {
@@ -106,6 +106,18 @@
         { at: at(5), email: "dongnghiep1.demo@example.com", event: "login" },
         { at: at(6), email: "admin.demo@example.com", event: "logout" },
       ];
+    },
+    // Bản xem trước không gọi Google: đường giả gấp khúc qua các điểm, chỉ để xem giao diện.
+    async getRoute(points) {
+      await new Promise((r) => setTimeout(r, 300));
+      const path = [], legs = [];
+      points.forEach((p, k) => {
+        if (!k) { path.push([p.lat, p.lng]); return; }
+        const q = points[k - 1], km = 111 * Math.hypot(p.lat - q.lat, (p.lng - q.lng) * 0.93) * 1.3;
+        path.push([q.lat, p.lng], [p.lat, p.lng]);
+        legs.push({ km, min: km * 2.4 });
+      });
+      return { order: points.slice(1).map((_, k) => k), legs, path };
     },
     async getChanges() { return changes; },
     async getBoot() { return { settings: await this.getSettings(), snapshot: await this.getSnapshot(), changes: await this.getChanges() }; },

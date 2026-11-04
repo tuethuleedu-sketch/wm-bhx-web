@@ -11,6 +11,13 @@
     },
   };
   let token = store.get(), boot = null;
+  function decodePolyline(s) {
+    const out = [];
+    let i = 0, lat = 0, lng = 0;
+    const next = () => { let b, shift = 0, v = 0; do { b = s.charCodeAt(i++) - 63; v |= (b & 31) << shift; shift += 5; } while (b >= 32); return v & 1 ? ~(v >> 1) : v >> 1; };
+    while (i < s.length) { lat += next(); lng += next(); out.push([lat / 1e5, lng / 1e5]); }
+    return out;
+  }
   const snapOf = (d) => ({ ...d, wmExpires: d.wmExpires ? new Date(d.wmExpires) : null });
 
   async function call(action, payload = {}) {
@@ -57,6 +64,11 @@
     resetPassword: (email) => call("resetPassword", { email }),
     async signOut() { try { await call("logout"); } finally { token = null; store.set(null); } },
     getSnapshot: async () => snapOf(await call("snapshot")),
+    // Đường đi thực tế: backend trả polyline mã hoá của Google, giải mã thành [[vĩ, kinh], ...] cho bản đồ.
+    async getRoute(points) {
+      const d = await call("route", { points });
+      return { order: d.order, legs: d.legs, path: d.polys.flatMap(decodePolyline) };
+    },
     getChanges: () => call("changes"),
     getVersions: () => call("versions"),
     getSettings: () => call("settings"),

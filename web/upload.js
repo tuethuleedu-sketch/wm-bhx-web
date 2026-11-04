@@ -8,21 +8,22 @@ window.WMUpload = (function () {
     lat: ["Latitude", "Vĩ độ", "Lat"],
     lng: ["Longitude", "Kinh độ", "Lng", "Long"],
     // Tuỳ chọn
-    khu_vuc: ["Khu vực", "Khu vuc", "Urban/Rural", "Phân loại khu vực", "Thành thị/Nông thôn", "Area"],
+    khu_vuc: ["Khu vực", "Khu vuc", "Urban/Rural", "Phân loại khu vực", "Loại khu vực", "Thành thị/Nông thôn", "Area"],
     chuoi: ["Chuỗi", "Chuoi", "Chain", "Brand", "Mô hình"],
     dia_chi: ["Địa chỉ", "Địa chỉ CH", "Dia chi", "Address"],
     vung: ["Vùng", "Vung", "Region", "Zone"],
     mien: ["Miền", "Mien", "Vùng miền"],
     quan: ["Quận/Huyện", "Quận", "Huyện", "Quận huyện", "Quận/Huyện cũ", "District"],
+    phuong: ["Phường/Xã", "Phường", "Xã", "Phường xã", "Xã/Phường", "Phường/Xã mới", "Ward"],
   };
-  const OPTIONAL = new Set(["ten", "khu_vuc", "chuoi", "dia_chi", "vung", "mien", "quan"]);
+  const OPTIONAL = new Set(["ten", "khu_vuc", "chuoi", "dia_chi", "vung", "mien", "quan", "phuong"]);
   const plain = (s) => norm(s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase();
-  // "Thành thị"/"urban"/"nội thành" → Urban; "Nông thôn"/"rural"/"ngoại thành" → Rural; khác giữ nguyên
+  // "Thành thị"/"urban"/"nội thành"/U/TT → Urban; "Nông thôn"/"rural"/"ngoại thành"/R/NT → Rural; khác giữ nguyên
   function khuVuc(v) {
     const s = plain(v);
     if (!s) return "";
-    if (/urban|thanh thi|noi thanh|do thi/.test(s)) return "Urban";
-    if (/rural|nong thon|ngoai thanh/.test(s)) return "Rural";
+    if (/rural|nong thon|ngoai thanh|^(r|nt)$/.test(s)) return "Rural";
+    if (/urban|thanh thi|noi thanh|do thi|^(u|tt)$/.test(s)) return "Urban";
     return norm(v).slice(0, 30);
   }
   // WinMart+ / WM+ / WMP → WM+; WinMart / WMT → WMT; trống → mặc định của lần upload
@@ -35,8 +36,10 @@ window.WMUpload = (function () {
   }
   const BBOX = [8.0, 24.5, 102.0, 110.0];
   const MOVE_KM = 0.05;
-  const ALL = new Set(Object.values(COLS).flat());
   const norm = (v) => String(v ?? "").trim();
+  // So tên cột bỏ qua hoa thường, dấu, khoảng trắng: "PHƯỜNG / XÃ" khớp "Phường/Xã".
+  const headKey = (v) => plain(v).replace(/[^a-z0-9]/g, "");
+  const ALL = new Set(Object.values(COLS).flat().map(headKey));
 
   // Thư viện Excel nặng nên chỉ tải khi Admin vào tab upload hoặc chọn file.
   let lib = null;
@@ -59,7 +62,7 @@ window.WMUpload = (function () {
     const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true })
       .map((r) => (r || []).map((v) => (typeof v === "string" && ERR.test(v.trim()) ? null : v)));    let best = -1, bestScore = 0;
     grid.slice(0, 8).forEach((r, i) => {
-      const s = (r || []).filter((v) => ALL.has(norm(v))).length;
+      const s = (r || []).filter((v) => ALL.has(headKey(v))).length;
       if (s > bestScore) { bestScore = s; best = i; }
     });
     if (bestScore < 2) return { error: "Không dò được dòng tiêu đề (8 dòng đầu không có đủ tên cột)." };
@@ -68,7 +71,7 @@ window.WMUpload = (function () {
     // Cột đầu tiên tồn tại VÀ có dữ liệu (giống _pick trong Python)
     const mapping = {}, missing = [];
     for (const [k, cands] of Object.entries(COLS)) {
-      const c = cands.map((n) => header.indexOf(n)).find((ix) => ix >= 0 && body.some((r) => r[ix] !== null && norm(r[ix]) !== ""));
+      const c = cands.map((n) => header.map(headKey).indexOf(headKey(n))).find((ix) => ix >= 0 && body.some((r) => r[ix] !== null && norm(r[ix]) !== ""));
       if (c === undefined) { if (!OPTIONAL.has(k)) missing.push(k); } else mapping[k] = c;
     }
     return { header, headerRow: best + 1, body, mapping, missing };
@@ -85,7 +88,7 @@ window.WMUpload = (function () {
       const ma = norm(r[p.mapping.ma]);
       const rec = { line, ma, ten: col(r, "ten") || ma,
         tinh: norm(r[p.mapping.tinh]), lat: num(r[p.mapping.lat]), lng: num(r[p.mapping.lng]),
-        khu_vuc: khuVuc(col(r, "khu_vuc")), chuoi: chuoi(col(r, "chuoi"), dfltChuoi), dia_chi: col(r, "dia_chi").slice(0, 300), vung: col(r, "vung").slice(0, 50), mien: col(r, "mien").slice(0, 50), quan: col(r, "quan").slice(0, 50) };
+        khu_vuc: khuVuc(col(r, "khu_vuc")), chuoi: chuoi(col(r, "chuoi"), dfltChuoi), dia_chi: col(r, "dia_chi").slice(0, 300), vung: col(r, "vung").slice(0, 50), mien: col(r, "mien").slice(0, 50), quan: col(r, "quan").slice(0, 50), phuong: col(r, "phuong").slice(0, 50) };
       let why = "";
       if (!ma) why = "thiếu mã";
       else if (!rec.chuoi) why = `chuỗi "${col(r, "chuoi")}" không phải WM+/WMT`;

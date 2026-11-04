@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow, noarchive, noai, noimageai">
   <!-- GitHub Pages không cho đặt header → CSP qua thẻ meta. Chỉ cho tải script từ chính trang + 2 CDN, chỉ gọi API Apps Script. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'self'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; connect-src https://script.google.com https://script.googleusercontent.com https://nominatim.openstreetmap.org; base-uri 'none'; form-action 'self'; object-src 'none'">
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -72,12 +72,17 @@
           <div class="chips-box"><span class="chips-label">Đối thủ (bấm để bật/tắt)</span>
             <div id="chips" class="chips"></div></div>
           <label>Chuỗi WM <select id="chuoi"><option value="">Tất cả</option><option>WM+</option><option>WMT</option></select></label>
-          <label>Khu vực <select id="khu"><option value="">Tất cả</option><option>Urban</option><option>Rural</option><option value="-">Chưa phân loại</option></select></label>
-          <label>Miền <select id="mien" title="Theo cột Miền của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều miền thì theo WM gần nhất"><option value="">Tất cả</option></select></label>
-          <label>Vùng <select id="vung" title="Theo cột Vùng của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều vùng thì theo WM gần nhất"><option value="">Tất cả</option></select></label>
+          <label>Khu vực <select id="khu"><option value="">Tất cả</option></select></label>
+          <label class="combo short" title="Theo cột Miền của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều miền thì theo WM gần nhất">Miền <input id="mien-q" placeholder="Tất cả" autocomplete="off">
+            <div class="combo-list" id="mien-list" hidden></div></label>
+          <label class="combo short" title="Theo cột Vùng của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều vùng thì theo WM gần nhất">Vùng <input id="vung-q" placeholder="Tất cả" autocomplete="off">
+            <div class="combo-list" id="vung-list" hidden></div></label>
           <label class="combo">Tỉnh <input id="tinh-q" placeholder="Tất cả — gõ để tìm tỉnh" autocomplete="off">
             <div class="combo-list" id="tinh-list" hidden></div></label>
-          <label>Quận <select id="quan" title="Theo cột Quận/Huyện của file WM+. Đối thủ theo địa chỉ; địa chỉ không ghi quận thì theo WM gần nhất trong tỉnh"><option value="">Tất cả</option></select></label>
+          <label class="combo short" title="Theo cột Quận/Huyện của file WM+. Đối thủ theo địa chỉ; địa chỉ không ghi quận thì theo WM gần nhất trong tỉnh">Quận <input id="quan-q" placeholder="Tất cả — gõ để tìm" autocomplete="off">
+            <div class="combo-list" id="quan-list" hidden></div></label>
+          <label class="combo short" title="Theo cột Phường/Xã của file WM+. Đối thủ theo địa chỉ; địa chỉ không ghi phường thì theo WM gần nhất trong quận">Phường/Xã <input id="phuong-q" placeholder="Tất cả — gõ để tìm" autocomplete="off">
+            <div class="combo-list" id="phuong-list" hidden></div></label>
           <label>Bán kính (km) <input id="r-num" type="number" min="0.1" max="30" step="0.1" value="1"></label>
           <label class="combo search">Tìm cửa hàng / địa chỉ <input id="q" placeholder="Mã, tên, số nhà, tên đường…" autocomplete="off">
             <div class="combo-list" id="q-list" hidden></div></label>
@@ -94,6 +99,22 @@
           <div class="card kpi"><span>Median <i class="lab">BHX</i> gần nhất</span><b id="k-med">–</b><small>không phụ thuộc R</small></div>
         </div>
 
+        <div class="card route-card" id="rt-card">
+          <div class="route-bar small">
+            <b>Lập tuyến theo bộ lọc</b>
+            <label class="combo search" id="rt-addr-box">Địa chỉ xuất phát <input id="rt-addr" placeholder="Địa chỉ cụ thể, mã cửa hàng, toạ độ hoặc link Google Maps…" autocomplete="off">
+              <div class="combo-list" id="rt-addr-list" hidden></div></label>
+            <button class="ghost" id="rt-gps">Vị trí của tôi</button>
+            <label>Phương tiện <select id="rt-mode"><option value="two-wheeler">Xe máy</option><option value="driving">Ô tô</option><option value="line">Đường thẳng (không gửi Google)</option></select></label>
+            <label>Đi tới <select id="rt-to"><option value="wm">WM</option><option value="comp">Đối thủ đang bật</option><option value="all">WM và đối thủ</option></select></label>
+            <label>Số cửa hàng <input id="rt-n" type="number" min="1" max="50" step="1" value="10"></label>
+            <button id="rt-go">Lập tuyến</button>
+            <button class="ghost" id="rt-clear" hidden>Xoá tuyến</button>
+            <span class="muted" id="rt-msg"></span>
+          </div>
+          <div id="rt-result" class="route-result small" hidden></div>
+        </div>
+
         <div class="card map-card" id="map-card">
           <div id="map"></div>
           <aside id="area-panel" class="area-panel" hidden></aside>
@@ -107,15 +128,6 @@
             <span><i class="dot ring-wmt"></i>Viền tím = WMT</span>
             <span>Chấm đậm: đối thủ trong R · chấm nhạt: ngoài R (bấm để xem thông tin); màu theo nút lọc ở trên</span>
           </div>
-          <div class="route-bar small">
-            <b>Lập tuyến đi WM</b>
-            <label>Xuất phát <select id="rt-from"><option value="sel">WM đang chọn</option><option value="click">Điểm bấm trên bản đồ</option><option value="gps">Vị trí của tôi</option></select></label>
-            <label>Số cửa hàng <input id="rt-n" type="number" min="1" max="50" step="1" value="10"></label>
-            <button id="rt-go">Lập tuyến</button>
-            <button class="ghost" id="rt-clear" hidden>Xoá tuyến</button>
-            <span class="muted" id="rt-msg"></span>
-          </div>
-          <div id="rt-result" class="route-result small" hidden></div>
         </div>
 
         <div class="card">
@@ -163,7 +175,7 @@
             <b>Mã</b> <code>Mã WM+ / Mã CH / Mã SAP / Code</code> · <b>Tỉnh</b> <code>Tỉnh mới / Tỉnh/Thành / Tỉnh/TP / Tỉnh/TP cũ trước 1/7 / Tỉnh</code> ·
             <b>Vĩ độ</b> <code>Latitude / Vĩ độ / Lat</code> · <b>Kinh độ</b> <code>Longitude / Kinh độ / Lng / Long</code>.
             Tuỳ chọn: <b>Tên</b> <code>Tên WM+ / Tên CH / Tên cửa hàng</code> · <b>Khu vực</b> <code>Khu vực / Urban/Rural</code> (Urban, Rural, Thành thị, Nông thôn) ·
-            <b>Chuỗi</b> <code>Chuỗi / Chain</code> (WM+ hoặc WMT) · <b>Địa chỉ</b> <code>Địa chỉ / Address</code> · <b>Miền</b> <code>Miền / Vùng miền</code> · <b>Vùng</b> <code>Vùng / Region / Zone</code> · <b>Quận</b> <code>Quận/Huyện / Quận / Huyện / District</code> (ghi sao lên bộ lọc vậy).</p>
+            <b>Chuỗi</b> <code>Chuỗi / Chain</code> (WM+ hoặc WMT) · <b>Địa chỉ</b> <code>Địa chỉ / Address</code> · <b>Miền</b> <code>Miền / Vùng miền</code> · <b>Vùng</b> <code>Vùng / Region / Zone</code> · <b>Quận</b> <code>Quận/Huyện / Quận / Huyện / District</code> · <b>Phường/Xã</b> <code>Phường/Xã / Phường / Xã / Ward</code> (ghi sao lên bộ lọc vậy).</p>
           <p class="muted small">File được đọc ngay trên trình duyệt; chỉ các cột trên được gửi lên khi bạn bấm <b>Áp dụng</b>. Mỗi lần áp dụng <b>thay toàn bộ</b> danh sách cũ — muốn có cả WM+ và WMT thì để chung 1 file, phân biệt bằng cột Chuỗi. Dữ liệu tự xoá sau 48 giờ.</p>
           <div class="controls">
             <label>File <input type="file" id="up-file" accept=".xlsx,.xls,.csv"></label>

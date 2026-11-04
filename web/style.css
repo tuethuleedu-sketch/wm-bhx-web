@@ -67,7 +67,7 @@ i.lab { font-style: normal; }
 .kpi > span:first-child::first-letter { text-transform: uppercase; }
 #r-num { width: 90px; } #top-n { width: 76px; }
 #snap-info { margin-left: auto; }
-.combo { position: relative; } #tinh-q { width: 240px; } .combo.search input { width: 300px; }
+.combo { position: relative; } #tinh-q { width: 180px; } .combo.short input { width: 150px; } .combo.search input { width: 300px; }
 .combo-list { position: absolute; top: 100%; left: 0; z-index: 1000; min-width: 100%; width: max-content; max-width: 460px; max-height: 320px; overflow: auto;
   background: var(--surface); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.12); margin-top: 2px; }
 .combo-list div { padding: 6px 10px; font-size: 13px; color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -121,9 +121,14 @@ i.lab { font-style: normal; }
 .bar-val { text-align: right; font-variant-numeric: tabular-nums; }
 
 .table-wrap { max-height: 340px; overflow: auto; border-top: 1px solid var(--line); }
-.route-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 10px 12px 0; }
-.route-bar input { width: 70px; }
-.route-result { padding: 8px 12px 12px; }
+.route-card { margin-bottom: 12px; }
+.leaflet-container.rt-arm { cursor: crosshair; }
+.route-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.route-bar #rt-n { width: 70px; }
+.route-bar #rt-addr-box { flex: 1 1 280px; }
+.route-bar #rt-addr { width: 100%; }
+.route-result { padding-top: 10px; }
+.route-result summary { cursor: pointer; margin-top: 8px; }
 .route-result .table-wrap { max-height: 260px; }
 .rt-num { background: #0b6bcb; color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 11px/18px sans-serif; text-align: center; box-shadow: 0 0 2px #0008; }
 .rt-num.start { background: #222; }
