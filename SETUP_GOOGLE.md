@@ -113,6 +113,9 @@ SYNC_SECRET=chuỗi-64-ký-tự
 - **Lộ SYNC_SECRET:** Apps Script → Project Settings → Script properties → sửa `SYNC_SECRET` thành chuỗi mới → cập nhật GitHub Secret (và `.env` nếu có).
 - **Tốc độ:** mỗi lần tải khoảng 1–3 giây (Apps Script chậm hơn database thật). Đủ cho nhóm nhỏ.
 - Bản đồ nền dùng tile OpenStreetMap (miễn phí, có chính sách sử dụng hợp lý); dùng nội bộ ít người thì ổn.
+- **Giá đối thủ:** chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Dữ liệu nằm ở các tab `price_*` của Sheet chính, giữ lâu dài, không có giá WM.
+  Thiết lập: Apps Script → Project Settings → Script properties → tự thêm `BHX_AUTHORIZATION`, `BHX_ACCESSTOKEN`, `BHX_CUSTOMER_ID`, `BHX_DEVICEID`, `BHX_DEVICETOKEN`, `BHX_USERNAME`, `BHX_XAPIKEY`. Sau đó điền mã tỉnh, phường, cửa hàng trong tab Giá đối thủ, bấm **Thử kết nối** rồi **Cập nhật giá**. Các tab `price_*` tự tạo ở lần lưu đầu tiên, không cần chạy lại `setup`.
+  Token không nhập vào web, không dán vào code, không gửi cho ai. Ai có quyền sửa Apps Script đều đọc được token, nên giới hạn người có quyền này. Token hết hạn: thay trong Script properties rồi bấm **Tiếp tục cập nhật**.
 
 ## Test có sẵn (cho người bảo trì)
 - `gas/test/run_tests.html`: test backend `Code.gs` trên môi trường Google giả lập (mật khẩu, quyền, upload, hết hạn 48h, đồng bộ BHX, thu hồi, nhật ký).
