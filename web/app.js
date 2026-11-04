@@ -16,7 +16,7 @@
   const chainName = (c) => (CHAINS[c] || { name: c }).name;
   // S.all: mọi đối thủ đã tải; S.bhx: phần đang bật ở nút lọc — toàn bộ phép tính khoảng cách chỉ dùng S.bhx.
   let S = { user: null, wm: [], all: [], bhx: [], chains: new Set(["BHX"]), compStatus: {}, near: null, nearIdx: null, pairsBy: null, Rcalc: 0, R: 1, topBy: null, topN: 5,
-    mien: "", vung: "", tinh: "", quan: "", phuong: "", chuoi: "", khu: "", q: "", sel: null, sortK: "n", sortDir: -1 };
+    mien: new Set(), vung: new Set(), tinh: new Set(), quan: new Set(), phuong: new Set(), khu: new Set(), chuoi: "", q: "", sel: null, sortK: "n", sortDir: -1 };
 
   // ---------- Tính toán ----------
   // Lưu sẵn các cặp WM–BHX trong bán kính Rcalc (≥ 5 km, tự tăng khi kéo R lớn hơn) và K đối thủ gần nhất, không phụ thuộc R.
@@ -90,51 +90,68 @@
     // Khu vực: liệt kê đúng các giá trị có trong file, kèm số cửa hàng, để không có giá trị nào bị lọc mất.
     const nKhu = new Map();
     S.wm.forEach((w) => nKhu.set(w.khu_vuc || "-", (nKhu.get(w.khu_vuc || "-") || 0) + 1));
-    $("#khu").innerHTML = `<option value="">Tất cả</option>` + [...nKhu].sort((a, b) => (a[0] === "-") - (b[0] === "-") || a[0].localeCompare(b[0])).map(([v, n]) =>
-      `<option value="${esc(v)}">${esc(v === "-" ? "Chưa phân loại" : v)} (${fmt(n)})</option>`).join("");
-    if (!nKhu.has(S.khu)) S.khu = "";
-    $("#khu").value = S.khu;
+    OPT.khu = [...nKhu].sort((a, b) => (a[0] === "-") - (b[0] === "-") || a[0].localeCompare(b[0])).map(([v, n]) => ({ v, t: `${v === "-" ? "Chưa phân loại" : v} (${fmt(n)})` }));
   }
-  // Các ô lọc có gõ tìm: OPT giữ danh sách đang chọn được, các ô sau chỉ liệt kê phần thuộc ô trước; giá trị không còn trong danh sách thì bỏ.
-  const OPT = { mien: [], vung: [], quan: [], phuong: [] };
-  const optLabel = (dim) => (OPT[dim].find((o) => o.v === S[dim]) || { t: "" }).t;
+  // Các ô lọc chọn được nhiều giá trị (S[dim] là Set, rỗng = tất cả). OPT giữ danh sách đang chọn được,
+  // các ô sau chỉ liệt kê phần thuộc ô trước; giá trị không còn trong danh sách thì bỏ.
+  const OPT = { mien: [], vung: [], quan: [], phuong: [], khu: [] };
+  const inSet = (set, v) => !set.size || set.has(v);
+  const setKey = (set) => [...set].sort().join(",");
+  const optLabels = (dim) => OPT[dim].filter((o) => S[dim].has(o.v)).map((o) => o.t);
+  const boxText = (set, labels) => (set.size > 1 ? `${fmt(set.size)} đã chọn` : labels[0] || "");
+  // Đang mở danh sách thì ô để trống cho gõ tìm; đóng lại mới hiện giá trị đã chọn.
+  function syncBox(dim) {
+    const el = $(`#${dim}-q`);
+    if (!el.dataset.open) el.value = boxText(S[dim], optLabels(dim));
+  }
+  function syncTinh() {
+    const el = $("#tinh-q");
+    if (!el.dataset.open) el.value = boxText(S.tinh, [...S.tinh].map(provName));
+  }
   function setOpts(dim, list) {
     OPT[dim] = list;
-    if (!list.some((o) => o.v === S[dim])) S[dim] = "";
-    $(`#${dim}-q`).value = optLabel(dim);
+    const have = new Set(list.map((o) => o.v));
+    S[dim].forEach((v) => { if (!have.has(v)) S[dim].delete(v); });
+    syncBox(dim);
   }
   function fillVung() {
-    const inM = (x) => !S.mien || x.mien === S.mien;
-    setOpts("mien", OPT.mien);
+    const inM = (x) => inSet(S.mien, x.mien);
+    setOpts("mien", OPT.mien); setOpts("khu", OPT.khu);
     setOpts("vung", optList(S.wm.filter(inM), S.wm.concat(S.all).filter(inM), "vung"));
   }
-  const regionName = () => [S.mien, S.vung].filter(Boolean).map((v) => (v === "-" ? "nơi chưa rõ vùng, miền" : v)).join(" · ");
-  const inVung = (x) => (!S.mien || x.mien === S.mien) && (!S.vung || x.vung === S.vung);
+  // Tên khu vực đang lọc cho dòng chú thích: tối đa 2 tên, nhiều hơn thì ghi số lượng.
+  const listName = (names) => (names.length > 2 ? `${names.slice(0, 2).join(", ")} và ${fmt(names.length - 2)} nơi khác` : names.join(", "));
+  const whereName = () => {
+    const pick = S.phuong.size ? optLabels("phuong") : S.quan.size ? optLabels("quan") : S.tinh.size ? [...S.tinh].map(provName) : optLabels("vung").concat(optLabels("mien"));
+    return listName(pick.map((t) => (t === "Chưa rõ" ? "nơi chưa rõ" : t)));
+  };
+  const inVung = (x) => inSet(S.mien, x.mien) && inSet(S.vung, x.vung);
+  const inTinh = (x) => inSet(S.tinh, provKey(x.tinh));
   // Các tỉnh còn lại sau khi lọc Miền/Vùng
   const provsInRegion = () => new Set(S.wm.concat(S.all).filter(inVung).map((x) => provKey(x.tinh)));
   // Tên quận trùng nhau giữa các tỉnh nên khoá gồm cả tỉnh.
   const quanKey = (x) => provKey(x.tinh) + "|" + x.quan;
-  const inQuan = (x) => !S.quan || (S.quan === "-" ? x.quan === "-" : quanKey(x) === S.quan);
+  const inQuan = (x) => !S.quan.size || S.quan.has(x.quan === "-" ? "-" : quanKey(x));
   // Tên phường trùng giữa các quận, các tỉnh nên khoá gồm cả tỉnh và quận.
   const phuongKey = (x) => quanKey(x) + "|" + x.phuong;
-  const inPhuong = (x) => !S.phuong || (S.phuong === "-" ? x.phuong === "-" : phuongKey(x) === S.phuong);
+  const inPhuong = (x) => !S.phuong.size || S.phuong.has(x.phuong === "-" ? "-" : phuongKey(x));
   const keyedOpts = (rows, dim, keyOf, labelOf) => {
     const names = new Map();
     rows.forEach((x) => { if (x[dim] !== "-" && x.chuoi) names.set(keyOf(x), labelOf(x)); });   // chỉ WM mới có cột chuoi; danh sách lấy theo file WM+
     return [...names].map(([v, t]) => ({ v, t })).sort(byViName).concat(rows.some((x) => x[dim] === "-") ? [{ v: "-", t: "Chưa rõ" }] : []);
   };
   function fillQuan() {
-    const ok = (x) => inVung(x) && (!S.tinh || provKey(x.tinh) === S.tinh);
-    setOpts("quan", keyedOpts(S.wm.concat(S.all).filter(ok), "quan", quanKey, (w) => w.quan + (S.tinh ? "" : " · " + provName(provKey(w.tinh)))));
+    const ok = (x) => inVung(x) && inTinh(x);
+    setOpts("quan", keyedOpts(S.wm.concat(S.all).filter(ok), "quan", quanKey, (w) => w.quan + (S.tinh.size === 1 ? "" : " · " + provName(provKey(w.tinh)))));
     fillPhuong();
   }
   function fillPhuong() {
-    const ok = (x) => inVung(x) && inQuan(x) && (!S.tinh || provKey(x.tinh) === S.tinh);
+    const ok = (x) => inVung(x) && inQuan(x) && inTinh(x);
     setOpts("phuong", keyedOpts(S.wm.concat(S.all).filter(ok), "phuong", phuongKey, (w) => w.phuong
-      + (S.quan || w.quan === "-" ? "" : " · " + w.quan) + (S.tinh ? "" : " · " + provName(provKey(w.tinh)))));
+      + (S.quan.size === 1 || w.quan === "-" ? "" : " · " + w.quan) + (S.tinh.size === 1 ? "" : " · " + provName(provKey(w.tinh)))));
   }
-  const inProv = (x) => inVung(x) && inQuan(x) && inPhuong(x) && (!S.tinh || provKey(x.tinh) === S.tinh);
-  const wmAttrOk = (w) => (!S.chuoi || w.chuoi === S.chuoi) && (!S.khu || (S.khu === "-" ? !w.khu_vuc : w.khu_vuc === S.khu));
+  const inProv = (x) => inVung(x) && inQuan(x) && inPhuong(x) && inTinh(x);
+  const wmAttrOk = (w) => (!S.chuoi || w.chuoi === S.chuoi) && inSet(S.khu, w.khu_vuc || "-");
   const pressOk = (w) => !S.chuoi || w.chuoi === S.chuoi;   // Pressure lọc theo chuỗi, bỏ qua Khu vực
   const scopeIdx = () => S.wm.map((_, i) => i).filter((i) => wmAttrOk(S.wm[i]) && inProv(S.wm[i]));
   const bhxScope = () => S.bhx.map((_, j) => j).filter((j) => inProv(S.bhx[j]));
@@ -143,7 +160,7 @@
   // Với mỗi BHX: WM gần nhất (theo Chuỗi/Khu vực đang lọc, mọi tỉnh) — dùng cho bảng BHX, popup, xuất CSV.
   let nearB = null, nearBKey = "";
   function bhxNearest() {
-    const key = S.chuoi + "|" + S.khu;
+    const key = S.chuoi + "|" + setKey(S.khu);
     if (nearB && nearBKey === key) return nearB;
     const W = S.wm.map((w, i) => i).filter((i) => wmAttrOk(S.wm[i])), grid = Nearby.index(W.map((i) => S.wm[i]));
     const d = new Float64Array(S.bhx.length).fill(Infinity), ix = new Int32Array(S.bhx.length).fill(-1);
@@ -224,7 +241,7 @@
       .setLatLng([p.lat / p.n, p.lng / p.n])
       .setContent(`${esc(provName(k))}<br><small>Có đối thủ</small> <b>${pct(p.hit / p.n)}</b> <small>${fmt(p.hit)}/${fmt(p.n)} WM</small>`
         + `<br><small>Pressure</small> <b>${nWm.get(k) ? pct((nBhx.get(k) || 0) / nWm.get(k)) : "–"}</b> <small>${fmt(nBhx.get(k) || 0)} ÷ ${fmt(nWm.get(k) || 0)}</small>`)
-      .on("click", () => setProv(S.tinh === k ? "" : k)).addTo(noteLayer));
+      .on("click", () => toggleProv(k)).addTo(noteLayer));
   }
   // Lớp nền: toàn bộ BHX đang mở (chấm xám) — luôn hiện, kể cả khi chưa có WM+; lọc theo tỉnh. Bấm → popup thông tin.
   function buildBhxAll() {
@@ -245,7 +262,7 @@
   function fitScope(withComp) {
     let pts = scopeIdx().map((i) => S.wm[i]);
     if (RT && RT.stops.length) { fitRoute(); return; }   // đang có tuyến thì giữ khung nhìn theo tuyến
-    if (S.tinh || S.quan || S.phuong || S.mien || S.vung || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
+    if (S.tinh.size || S.quan.size || S.phuong.size || S.mien.size || S.vung.size || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
     if (pts.length) map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [20, 20], maxZoom: 14 });
   }
   // Danh sách tỉnh: hợp các tỉnh có WM hoặc có đối thủ (mọi chuỗi, kể cả chuỗi đang tắt).
@@ -258,15 +275,24 @@
     PROVS = [...P].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }
   const provName = (k) => (PROVS.find((p) => p.key === k) || {}).name || "";
-  function clearRegion() { S.mien = S.vung = ""; fillVung(); fillQuan(); }
+  function clearRegion() { S.mien.clear(); S.vung.clear(); fillVung(); fillQuan(); }
   function regionChanged() {
     S.sel = null; fillVung();
-    if (S.tinh && !provsInRegion().has(S.tinh)) { S.tinh = ""; $("#tinh-q").value = ""; }   // tỉnh đang chọn không thuộc miền/vùng mới
-    fillQuan(); renderOverview(); fitScope();
+    const keep = provsInRegion();
+    S.tinh.forEach((k) => { if (!keep.has(k)) S.tinh.delete(k); });   // tỉnh đang chọn không thuộc miền/vùng mới
+    syncTinh(); fillQuan(); renderOverview(); fitScope();
+  }
+  function provsChanged() { S.sel = null; syncTinh(); fillQuan(); renderOverview(); fitScope(); }
+  // Chọn tỉnh ngoài vùng (bấm ghi chú, bấm thanh %, tìm cửa hàng) → bỏ lọc vùng.
+  function toggleProv(k) {
+    if (S.tinh.has(k)) S.tinh.delete(k);
+    else { if (!provsInRegion().has(k)) clearRegion(); S.tinh.add(k); }
+    provsChanged();
   }
   function setProv(k) {
-    if (k && !provsInRegion().has(k)) clearRegion();   // chọn tỉnh ngoài vùng (bấm ghi chú, tìm cửa hàng) → bỏ lọc vùng
-    S.tinh = k; S.sel = null; $("#tinh-q").value = provName(k); fillQuan(); renderOverview(); fitScope();
+    S.tinh.clear();
+    if (k) { if (!provsInRegion().has(k)) clearRegion(); S.tinh.add(k); }
+    provsChanged();
   }
   function buildWmMarkers() {                         // gọi lại mỗi khi danh sách WM+ đổi (upload)
     wmMarkers.forEach((mk) => mk.remove());
@@ -301,7 +327,7 @@
   const GMAP_STOPS = 10;
   const RT_HINT = "Nhập điểm xuất phát rồi bấm Lập tuyến, hoặc bấm một điểm trên bản đồ.";
   let RT = null, rtLayer = null, popupClosedAt = 0;
-  const filterKey = () => [S.mien, S.vung, S.tinh, S.quan, S.phuong, S.chuoi, S.khu].join("|");
+  const filterKey = () => [S.mien, S.vung, S.tinh, S.quan, S.phuong, S.khu].map(setKey).concat(S.chuoi).join("|");
   const routeKey = () => [filterKey(), [...S.chains].sort().join(), $("#rt-n").value, $("#rt-nc").value, $("#rt-mode").value].join("|");
   const rtHint = () => ($("#rt-msg").textContent = RT_HINT);
   // Mỗi lần bấm chỗ trống trên bản đồ là lập lại tuyến từ điểm đó; bấm để đóng popup thì bỏ qua.
@@ -450,11 +476,11 @@
     const byComp = {}; bScope.forEach((j) => { const c = S.bhx[j].chain; byComp[c] = (byComp[c] || 0) + 1; });
     const Rt = `${fmt(R, R % 1 ? 1 : 0)} km`, L = lab();
     $("#k-nbhx-sub").textContent = `Đếm ${L} có địa chỉ trong khu vực; ` + (S.chains.size > 1 ? Object.entries(byComp).map(([c, k]) => `${chainName(c)} ${fmt(k)}`).join(" · ") + " · " : "")
-      + (S.phuong ? `trong ${optLabel("phuong")}` : S.quan ? `trong ${optLabel("quan")}` : S.tinh ? `trong ${provName(S.tinh)}` : regionName() ? `trong ${regionName()}` : "cả nước, đang mở");
+      + (whereName() ? `trong ${whereName()}` : "cả nước, đang mở");
     // Pressure = số đối thủ ÷ số WM, theo tỉnh và chuỗi; bỏ qua Khu vực vì đối thủ không có Urban/Rural. Không phụ thuộc R.
     const nPress = S.wm.filter((w) => inProv(w) && pressOk(w)).length;
     $("#k-press").textContent = nPress ? pct(bScope.length / nPress) : "–";
-    $("#k-press-sub").textContent = `${fmt(bScope.length)} ${lab()} ÷ ${fmt(nPress)} WM` + (S.khu ? " · không lọc theo Khu vực" : "");
+    $("#k-press-sub").textContent = `${fmt(bScope.length)} ${lab()} ÷ ${fmt(nPress)} WM` + (S.khu.size ? " · không lọc theo Khu vực" : "");
     $("#k-cov").textContent = scope.length ? pct(cov / scope.length) : "–";
     $("#k-cov-sub").textContent = `${fmt(cov)} WM có ${L} trong ${Rt} ÷ ${fmt(scope.length)} WM`;
     $("#k-uniq").textContent = fmt(uniq.size);
@@ -468,7 +494,7 @@
     const by = {};
     S.wm.forEach((w, i) => { if (!wmAttrOk(w) || !inVung(w)) return; (by[w.tinh] ||= [0, 0]); by[w.tinh][1]++; if (S.near[i] <= R) by[w.tinh][0]++; });
     $("#bars").innerHTML = Object.entries(by).sort((a, b) => b[1][0] / b[1][1] - a[1][0] / a[1][1]).map(([t, [c, n]]) =>
-      `<div class="bar-row${provKey(t) === S.tinh ? " sel" : ""}" data-t="${esc(provKey(t))}" title="${c}/${n} WM"><span class="bar-name">${esc(t)}</span>
+      `<div class="bar-row${S.tinh.has(provKey(t)) ? " sel" : ""}" data-t="${esc(provKey(t))}" title="${c}/${n} WM"><span class="bar-name">${esc(t)}</span>
        <div class="bar-track"><div class="bar-fill" style="width:${(c / n) * 100}%"></div></div><span class="bar-val">${pct(c / n)}</span></div>`).join("")
       || `<p class="muted small">Chưa có WM trong bộ lọc.</p>`;
 
@@ -571,10 +597,10 @@
   // Mở cửa hàng tìm được: đưa bộ lọc về đúng tỉnh (và bỏ lọc Chuỗi/Khu vực nếu cửa hàng bị lọc mất), zoom tới, mở popup.
   function focusStore(kind, k) {
     const s = kind === "wm" ? S.wm[k] : S.bhx[k];
-    if (kind === "wm" && !wmAttrOk(s)) { S.chuoi = S.khu = ""; $("#chuoi").value = $("#khu").value = ""; }
+    if (kind === "wm" && !wmAttrOk(s)) { S.chuoi = ""; S.khu.clear(); $("#chuoi").value = ""; syncBox("khu"); }
     if (!inVung(s)) clearRegion();
     const qOut = !inQuan(s) || !inPhuong(s);
-    if (qOut) { S.quan = S.phuong = ""; fillQuan(); }
+    if (qOut) { S.quan.clear(); S.phuong.clear(); fillQuan(); }
     if (!inProv(s)) setProv(provKey(s.tinh)); else if (qOut && kind !== "wm") renderOverview();
     if (kind === "wm") { S.sel = null; select(k); }
     map.setView([s.lat, s.lng], 16);
@@ -596,40 +622,51 @@
       list.querySelectorAll("[data-k]").forEach((d, x) => d.classList.toggle("on", x === on));
       list.children[on] && list.children[on].scrollIntoView({ block: "nearest" });
     };
-    const pick = (k) => { list.hidden = true; cur[k] && cur[k].pick(); };
+    // opts.multi: chọn xong danh sách vẫn mở để chọn tiếp, ô để trống cho gõ tìm; bấm ra ngoài hoặc Esc thì đóng.
+    const pick = (k) => {
+      if (!opts.multi) { list.hidden = true; cur[k] && cur[k].pick(); return; }
+      const top = list.scrollTop;
+      if (cur[k]) cur[k].pick();
+      draw(input.value); list.scrollTop = top; hi(k);
+    };
+    const done = () => { if (!opts.multi) input.blur(); };
     input.addEventListener("input", () => draw(input.value));
-    input.addEventListener("focus", () => { input.select(); draw(opts.showAllOnFocus ? "" : input.value); });
+    input.addEventListener("focus", () => {
+      if (opts.multi) { input.dataset.open = "1"; input.value = ""; }
+      input.select(); draw(opts.showAllOnFocus ? "" : input.value);
+    });
     input.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown") { if (list.hidden) draw(input.value); else hi(on + 1); e.preventDefault(); }
       else if (e.key === "ArrowUp") { hi(on - 1); e.preventDefault(); }
-      else if (e.key === "Enter") { e.preventDefault(); if (!list.hidden) { pick(on); input.blur(); } }
+      else if (e.key === "Enter") { e.preventDefault(); if (!list.hidden) { pick(on); done(); } }
       else if (e.key === "Escape") { list.hidden = true; input.blur(); }
     });
     list.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      const d = e.target.closest("[data-k]"); if (d) { pick(+d.dataset.k); input.blur(); }
+      const d = e.target.closest("[data-k]"); if (d) { pick(+d.dataset.k); done(); }
     });
-    input.addEventListener("blur", () => { list.hidden = true; opts.onBlur && opts.onBlur(); });
+    input.addEventListener("blur", () => { list.hidden = true; delete input.dataset.open; opts.onBlur && opts.onBlur(); });
   }
+  const checkMark = (on, html) => `<span class="chk${on ? " on" : ""}">${on ? "✓" : ""}</span>${html}`;
   combo($("#tinh-q"), $("#tinh-list"), (q) => {
     const cW = {}, cB = {};
     S.wm.forEach((w) => { if (wmAttrOk(w) && inVung(w)) { const k = provKey(w.tinh); cW[k] = (cW[k] || 0) + 1; } });
     S.bhx.forEach((b) => { if (inVung(b)) { const k = provKey(b.tinh); cB[k] = (cB[k] || 0) + 1; } });
     const cLab = lab();
     const keep = provsInRegion(), inV = PROVS.filter((p) => keep.has(p.key));
-    const all = { html: `<b>Tất cả</b><small>${fmt(inV.length)} tỉnh</small>`, pick: () => setProv("") };
+    const all = { html: `<b>${S.tinh.size ? "Bỏ chọn tất cả" : "Tất cả"}</b><small>${fmt(inV.length)} tỉnh</small>`, pick: () => setProv("") };
     return (q ? [] : [all]).concat(inV.filter((p) => !q || plain(p.name).includes(q) || p.key.includes(q.replace(/[^a-z0-9]/g, "")))
-      .map((p) => ({ html: `${esc(p.name)}<small>${fmt(cW[p.key] || 0)} WM · ${fmt(cB[p.key] || 0)} ${esc(cLab)}</small>`, pick: () => setProv(p.key) })));
-  }, { showAllOnFocus: true, onBlur: () => ($("#tinh-q").value = provName(S.tinh)) });
-  // Miền, Vùng, Quận, Phường/Xã: gõ để tìm. Danh sách dài chỉ vẽ phần đầu cho đỡ nặng.
+      .map((p) => ({ html: checkMark(S.tinh.has(p.key), `${esc(p.name)}<small>${fmt(cW[p.key] || 0)} WM · ${fmt(cB[p.key] || 0)} ${esc(cLab)}</small>`), pick: () => toggleProv(p.key) })));
+  }, { showAllOnFocus: true, multi: true, onBlur: syncTinh });
+  // Miền, Vùng, Quận, Phường/Xã, Khu vực: gõ để tìm, chọn được nhiều. Danh sách dài chỉ vẽ phần đầu cho đỡ nặng.
   const COMBO_MAX = 300;
-  ["mien", "vung", "quan", "phuong"].forEach((dim) => combo($(`#${dim}-q`), $(`#${dim}-list`), (q) => {
-    const pick = (v) => () => { S[dim] = v; regionChanged(); };
+  ["mien", "vung", "quan", "phuong", "khu"].forEach((dim) => combo($(`#${dim}-q`), $(`#${dim}-list`), (q) => {
+    const toggle = (v) => () => { if (S[dim].has(v)) S[dim].delete(v); else S[dim].add(v); regionChanged(); };
     const found = OPT[dim].filter((o) => !q || plain(o.t).includes(q));
-    return (q ? [] : [{ html: `<b>Tất cả</b><small>${fmt(OPT[dim].length)} mục</small>`, pick: pick("") }])
-      .concat(found.slice(0, COMBO_MAX).map((o) => ({ html: esc(o.t), pick: pick(o.v) })))
+    return (q ? [] : [{ html: `<b>${S[dim].size ? "Bỏ chọn tất cả" : "Tất cả"}</b><small>${fmt(OPT[dim].length)} mục</small>`, pick: () => { S[dim].clear(); regionChanged(); } }])
+      .concat(found.slice(0, COMBO_MAX).map((o) => ({ html: checkMark(S[dim].has(o.v), esc(o.t)), pick: toggle(o.v) })))
       .concat(found.length > COMBO_MAX ? [{ html: `<small>Còn ${fmt(found.length - COMBO_MAX)} mục, gõ thêm để lọc</small>`, pick: () => {} }] : []);
-  }, { showAllOnFocus: true, onBlur: () => ($(`#${dim}-q`).value = optLabel(dim)) }));
+  }, { showAllOnFocus: true, multi: true, onBlur: () => syncBox(dim) }));
   combo($("#q"), $("#q-list"), (q) => {
     if (!q) return [];
     const out = [];
@@ -662,7 +699,9 @@
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
-  const fileTag = () => [S.chains.size === 1 ? [...S.chains][0].toLowerCase() : "nhieu_chuoi", ...[S.mien, S.vung].filter(Boolean).map((v) => (v === "-" ? "chua_ro" : plain(v).replace(/[^a-z0-9]+/g, "_"))), S.tinh || (S.mien || S.vung ? "" : "tat_ca_tinh"), S.quan && (S.quan === "-" ? "chua_ro_quan" : plain(S.quan.split("|")[1]).replace(/[^a-z0-9]+/g, "_")), S.phuong && (S.phuong === "-" ? "chua_ro_phuong" : plain(S.phuong.split("|")[2]).replace(/[^a-z0-9]+/g, "_")), S.chuoi && S.chuoi.replace("+", "plus"), S.khu && (S.khu === "-" ? "chua_phan_loai" : S.khu)].filter(Boolean).join("_") + `_R${S.R}km`;
+  // Tên file: 1 giá trị thì ghi tên (phần cuối của khoá), nhiều giá trị thì ghi số lượng.
+  const fileSlug = (set, name) => (!set.size ? "" : set.size > 1 ? `${set.size}_${name}` : [...set][0] === "-" ? `chua_ro_${name}` : plain([...set][0].split("|").pop()).replace(/[^a-z0-9]+/g, "_"));
+  const fileTag = () => [S.chains.size === 1 ? [...S.chains][0].toLowerCase() : "nhieu_chuoi", fileSlug(S.mien, "mien"), fileSlug(S.vung, "vung"), S.tinh.size || S.mien.size || S.vung.size ? fileSlug(S.tinh, "tinh") : "tat_ca_tinh", fileSlug(S.quan, "quan"), fileSlug(S.phuong, "phuong"), S.chuoi && S.chuoi.replace("+", "plus"), fileSlug(S.khu, "khu_vuc")].filter(Boolean).join("_") + `_R${S.R}km`;
 
   // ---------- Thay đổi BHX ----------
   let CH = [];
@@ -739,8 +778,8 @@
     const snap = preSnap || await API.getSnapshot();
     S.wm = snap.wm.map((w) => ({ ...w, chuoi: w.chuoi || "WM+", khu_vuc: w.khu_vuc || "", dia_chi: w.dia_chi || "", vung: w.vung || "-", mien: w.mien || "-", quan: w.quan || "-", phuong: w.phuong || "-" }));
     S.all = snap.bhx.map((b) => ({ ...b, chain: "BHX" })).concat(snap.comp || []);
-    buildRegions(); clearRoute(); S.quan = S.phuong = "";
-    S.bhx = S.all.filter((b) => S.chains.has(b.chain)); S.sel = null; S.tinh = ""; $("#tinh-q").value = ""; clearRegion();
+    buildRegions(); clearRoute(); S.quan.clear(); S.phuong.clear(); S.khu.clear();
+    S.bhx = S.all.filter((b) => S.chains.has(b.chain)); S.sel = null; S.tinh.clear(); syncTinh(); clearRegion();
     try { S.compStatus = JSON.parse(snap.compStatus || "{}"); } catch (_) { S.compStatus = {}; }
     const left = snap.wmExpires ? (snap.wmExpires - Date.now()) / 3600e3 : 0;
     $("#snap-info").textContent = `${fmt(S.wm.length)} WM (${snap.wmVersion}`
@@ -899,7 +938,6 @@
       () => (msg.textContent = "Không lấy được vị trí. Hãy cho phép trình duyệt dùng vị trí, hoặc nhập địa chỉ."), { timeout: 10000 });
   });
   $("#chuoi").addEventListener("change", (e) => { S.chuoi = e.target.value; S.sel = null; renderOverview(); fitScope(); });
-  $("#khu").addEventListener("change", (e) => { S.khu = e.target.value; S.sel = null; renderOverview(); fitScope(); });
   $("#q").addEventListener("input", (e) => { S.q = plain(e.target.value.trim()); renderWmTable(scopeIdx()); $("#bhx-count").textContent = `(${fmt(bhxRows().length)})`; });
   $("#top-n").addEventListener("change", (e) => {
     S.topN = Math.max(1, Math.floor(+e.target.value) || 5);
@@ -921,7 +959,7 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#map-card").classList.contains("map-max")) setMapMax(false); });
   $("#bars").addEventListener("click", (e) => {
     const r = e.target.closest(".bar-row"); if (!r) return;
-    setProv(S.tinh === r.dataset.t ? "" : r.dataset.t);
+    toggleProv(r.dataset.t);
   });
   $("#t-wm").addEventListener("click", (e) => {
     const th = e.target.closest("th[data-k]");

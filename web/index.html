@@ -9,7 +9,7 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611041146">
+  <link rel="stylesheet" href="style.css?v=202611041318">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -72,7 +72,8 @@
           <div class="chips-box"><span class="chips-label">Đối thủ (bấm để bật/tắt)</span>
             <div id="chips" class="chips"></div></div>
           <label>Chuỗi WM <select id="chuoi"><option value="">Tất cả</option><option>WM+</option><option>WMT</option></select></label>
-          <label>Khu vực <select id="khu"><option value="">Tất cả</option></select></label>
+          <label class="combo short">Khu vực <input id="khu-q" placeholder="Tất cả" autocomplete="off">
+            <div class="combo-list" id="khu-list" hidden></div></label>
           <label class="combo short" title="Theo cột Miền của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều miền thì theo WM gần nhất">Miền <input id="mien-q" placeholder="Tất cả" autocomplete="off">
             <div class="combo-list" id="mien-list" hidden></div></label>
           <label class="combo short" title="Theo cột Vùng của file WM+. Đối thủ theo tỉnh; tỉnh chia nhiều vùng thì theo WM gần nhất">Vùng <input id="vung-q" placeholder="Tất cả" autocomplete="off">
@@ -219,12 +220,12 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611041146"></script>
-  <script src="demo-data.js?v=202611041146"></script>
-  <script src="gas-api.js?v=202611041146"></script>
-  <script src="upload.js?v=202611041146"></script>
-  <script src="area.js?v=202611041146"></script>
-  <script src="nearby.js?v=202611041146"></script>
-  <script src="app.js?v=202611041146"></script>
+  <script src="config.js?v=202611041318"></script>
+  <script src="demo-data.js?v=202611041318"></script>
+  <script src="gas-api.js?v=202611041318"></script>
+  <script src="upload.js?v=202611041318"></script>
+  <script src="area.js?v=202611041318"></script>
+  <script src="nearby.js?v=202611041318"></script>
+  <script src="app.js?v=202611041318"></script>
 </body>
 </html>

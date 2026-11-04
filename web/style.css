@@ -73,6 +73,8 @@ i.lab { font-style: normal; }
 .combo-list div { padding: 6px 10px; font-size: 13px; color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .combo-list div small { color: var(--muted); margin-left: 6px; }
 .combo-list div.on, .combo-list div:hover { background: #e7f0ff; }
+.chk { display: inline-block; width: 15px; height: 15px; margin-right: 8px; border: 1px solid var(--line); border-radius: 3px; font-size: 11px; line-height: 14px; text-align: center; vertical-align: -2px; }
+.chk.on { background: #1c7ed6; border-color: #1c7ed6; color: #fff; }
 .combo-list .empty { color: var(--muted); cursor: default; }
 
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
