@@ -43,8 +43,10 @@
       // Mở lại bằng phiên đã lưu: lấy luôn dữ liệu ban đầu trong cùng 1 lần gọi, getBoot dùng lại kết quả này.
       // Chỉ phiên hết hạn mới về màn hình đăng nhập; máy chủ lỗi tạm thời thì báo lỗi, phiên vẫn giữ.
       try { boot = await call("boot", { resume: true }); return boot.me; }
-      catch (err) { if (err.code === "AUTH") return null; throw err; }
+      catch (err) { if (err.code === "AUTH") { this.sessionNote = err.message; return null; } throw err; }
     },
+    hasSession: () => !!token,
+    sessionNote: "",
     async getBoot() {
       const b = boot || await call("boot");
       boot = null;
@@ -83,6 +85,8 @@
     priceStep: (jobId) => call("priceStep", { jobId }),
     priceFinish: (jobId) => call("priceFinish", { jobId }),
     priceCancel: () => call("priceCancel"),
+    botStatus: () => call("botStatus"),
+    askClaude: (question, context, history) => call("askClaude", { question, context, history }),
     listUsers: () => call("listUsers"),
     addUser: (email, role) => call("addUser", { email, role }),
     removeUser: (email) => call("removeUser", { email }),

@@ -83,7 +83,7 @@
     { email: "dongnghiep1.demo@example.com", role: "viewer", added: "2026-10-30" },
   ];
 
-  let priceStore = null, priceJob = null, priceCfg = [{ tinh: "Hồ Chí Minh", provinceId: "1", wardId: "1", storeId: "1" }, { tinh: "Hà Nội", provinceId: "2", wardId: "2", storeId: "2" }, { tinh: "Cần Thơ", provinceId: "3", wardId: "3", storeId: "3" }];
+  let botUsed = 0, priceStore = null, priceJob = null, priceCfg = [{ tinh: "Hồ Chí Minh", provinceId: "1", wardId: "1", storeId: "1" }, { tinh: "Hà Nội", provinceId: "2", wardId: "2", storeId: "2" }, { tinh: "Cần Thơ", provinceId: "3", wardId: "3", storeId: "3" }];
   function priceDemo() {
     if (priceStore) return priceStore;
     let seed = 20261104;
@@ -188,6 +188,14 @@
     },
     async priceFinish() { return { ...priceJob }; },
     async priceCancel() { priceJob = null; return { provinces: priceCfg, missing: [], job: null }; },
+    // Bot ở bản xem trước: trả lời mẫu dựng từ số liệu, không gọi Claude và không gửi gì ra ngoài.
+    async botStatus() { return { hasKey: true, used: botUsed, limit: 30 }; },
+    async askClaude(q, ctx) {
+      await new Promise((r) => setTimeout(r, 500));
+      botUsed++;
+      const s = ctx.chi_so, top = (ctx.theo_nganh || [])[0];
+      return { used: botUsed, limit: 30, text: `[Bản xem trước: trả lời mẫu trên dữ liệu giả, chưa gọi Claude]\nCâu hỏi: ${q}\n\n${ctx.pham_vi.tinh}: ${s.ty_le_khuyen_mai}% SKU có khuyến mãi, mức giảm trung vị ${s.giam_trung_vi}%.` + (top ? `\nNgành khuyến mãi nhiều nhất: ${top.nganh} (${top.ty_le_khuyen_mai}%).` : "") };
+    },
     // Bản xem trước không gọi Google: đường giả gấp khúc qua các điểm, chỉ để xem giao diện.
     async getRoute(points) {
       await new Promise((r) => setTimeout(r, 300));

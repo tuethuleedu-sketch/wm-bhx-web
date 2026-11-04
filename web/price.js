@@ -156,10 +156,8 @@ window.WMPrice = (function () {
     $("#t-p-runs tbody").innerHTML = [...D.runs].reverse().slice(0, 60).map((r) => `<tr><td>${dayVN(r.date)}</td><td>${esc(r.tinh)}</td><td>${esc(r.file)}</td><td>${esc(r.store)}</td><td>${esc(r.by)}</td><td class="num">${fmt(r.n)}</td><td class="num">${fmt(r.added)}</td><td class="num">${fmt(r.up)}</td><td class="num">${fmt(r.down)}</td><td class="num">${fmt(r.gone)}</td></tr>`).join("");
   }
   // So sánh dùng rổ chung: chỉ SKU có giá ở mọi tỉnh, để chỉ số không lệch vì mỗi tỉnh bán danh mục khác nhau. Trung bình các tỉnh = 100.
-  function renderCompare() {
-    const P = [...D.byT.values()], many = P.length >= 2;
-    $("#p-compare-need").hidden = many; $("#p-compare-body").hidden = !many;
-    if (!many) return;
+  function compareCalc() {
+    const P = [...D.byT.values()];
     const ok = (x) => (!F.cat || x.cat === F.cat) && (!F.brand || x.brand === F.brand);
     const map = new Map();
     P.forEach((p, k) => p.active.forEach((x) => { if (!x.final || !x.base || !ok(x)) return; if (!map.has(x.id)) map.set(x.id, { x, at: new Array(P.length).fill(null) }); map.get(x.id).at[k] = x; }));
@@ -168,7 +166,12 @@ window.WMPrice = (function () {
       const sum = P.map((_, k) => list.reduce((a, m) => a + m.at[k][key], 0)), avg = sum.reduce((a, b) => a + b, 0) / P.length;
       return sum.map((v) => (avg ? (v / avg) * 100 : NaN));
     };
-    const iF = indexOf(common, "final"), iB = indexOf(common, "base");
+    return { P, ok, common, indexOf, iF: indexOf(common, "final"), iB: indexOf(common, "base") };
+  }
+  function renderCompare() {
+    const { P, ok, common, indexOf, iF, iB } = compareCalc(), many = P.length >= 2;
+    $("#p-compare-need").hidden = many; $("#p-compare-body").hidden = !many;
+    if (!many) return;
     const dates = new Set(P.map((p) => p.latest));
     $("#p-compare-note").innerHTML = `Rổ chung ${fmt(common.length)} SKU có giá ở cả ${fmt(P.length)} tỉnh; trung bình các tỉnh = 100. Trên 100 là đắt hơn trung bình. Giá gốc cho thấy mặt bằng giá; giá bán đã gồm khuyến mãi.`
       + (dates.size > 1 ? ` <b>Các tỉnh có ngày lấy giá khác nhau nên so sánh chỉ mang tính tham khảo.</b>` : "");
@@ -185,11 +188,8 @@ window.WMPrice = (function () {
     $("#t-p-gap tbody").innerHTML = gaps.map((g) => `<tr><td>${esc(g.m.x.name)}</td><td>${esc(g.m.x.cat)}</td>${g.m.at.map((x) => `<td class="num">${x.final === g.hi ? `<span class="p-hi">${fmt(x.final)}</span>` : x.final === g.lo ? `<span class="p-lo">${fmt(x.final)}</span>` : fmt(x.final)}</td>`).join("")}<td class="num">${pct(g.gap)}</td></tr>`).join("") || `<tr><td colspan="${P.length + 3}" class="muted">Không có SKU chênh giá.</td></tr>`;
   }
   // Rổ cố định: SKU trong bộ lọc có giá ở mọi mốc, nên chỉ số không đổi vì SKU mới vào hay SKU biến mất.
-  function renderTrend(rows) {
-    const ds = C.dates, enough = ds.length >= 2;
-    $("#p-trend-need").hidden = enough; $("#p-trend-body").hidden = !enough;
-    if (!enough) return;
-    const sum = ds.map(() => [0, 0]);
+  function trendCalc(rows) {
+    const ds = C.dates, sum = ds.map(() => [0, 0]);
     let basket = 0;
     rows.forEach((x) => {
       const at = ds.map((d) => priceAt(x.id, d));
@@ -202,6 +202,13 @@ window.WMPrice = (function () {
       scope.forEach((x) => { if (x.first_seen > d || x.last_seen < d) return; const h = priceAt(x.id, d); if (!h || !h[1]) return; all++; if (h[2] > h[1]) on++; });
       return all ? (on / all) * 100 : 0;
     });
+    return { sum, basket, rate };
+  }
+  function renderTrend(rows) {
+    const ds = C.dates, enough = ds.length >= 2;
+    $("#p-trend-need").hidden = enough; $("#p-trend-body").hidden = !enough;
+    if (!enough) return;
+    const { sum, basket, rate } = trendCalc(rows);
     $("#p-basket-n").textContent = `Rổ cố định ${fmt(basket)} SKU; lần đầu = 100.`;
     lineChart($("#p-index"), basket ? [{ name: "Giá bán", cls: "bhx", v: sum.map((s) => (s[0] / sum[0][0]) * 100) }, { name: "Giá gốc", cls: "base", v: sum.map((s) => (s[1] / sum[0][1]) * 100) }] : [], (v) => fmt(v, 1));
     lineChart($("#p-rate"), [{ name: "% SKU giảm giá", cls: "bhx", v: rate }], (v) => fmt(v, 1) + "%");
@@ -272,6 +279,33 @@ window.WMPrice = (function () {
     $("#p-pager").addEventListener("click", (e) => { const b = e.target.closest("[data-p]"); if (b && !b.disabled) { F.page += +b.dataset.p; renderSku(filtered()); } });
     $("#p-export").addEventListener("click", exportCsv);
   }
+  // Số tổng hợp cho bot, theo bộ lọc đang chọn. Cố ý không có tên SKU, mã SKU hay link; Apps Script cũng chỉ nhận đúng các nhóm này.
+  function context() {
+    if (!D || !C) return null;
+    const r1 = (v) => (isFinite(v) ? Math.round(v * 10) / 10 : null), p1 = (v) => (isFinite(v) ? Math.round(v * 1000) / 10 : null);
+    const rows = filtered(), offs = rows.filter((x) => x.off > 0).map((x) => x.off), n = rows.length;
+    const line = (key, name) => (g) => ({ [name]: g.name, so_sku: g.n, ty_le_khuyen_mai: p1(g.rate), giam_trung_vi: p1(g.off), gia_trung_vi: isFinite(g.price) ? g.price : null });
+    const out = {
+      pham_vi: { tinh: C.tinh, ngay_gia: C.latest, nganh: F.cat || "Tất cả", thuong_hieu: F.brand || "Tất cả", chi_sku_khuyen_mai: F.promo, tu_khoa_tim: F.q ? "có lọc theo từ khoá" : "không", so_cua_hang_moi_tinh: 1 },
+      chi_so: { so_sku: n, ty_le_khuyen_mai: n ? p1(rows.filter((x) => x.promo).length / n) : null, giam_trung_vi: p1(median(offs)), so_sku_giam_tu_30: rows.filter((x) => x.off >= 0.3).length, so_sku_khong_mua_duoc: rows.filter((x) => !x.can).length },
+      theo_nganh: group(rows, "cat").sort((a, b) => b.rate - a.rate).slice(0, 30).map(line("cat", "nganh")),
+      theo_thuong_hieu: group(rows, "brand").filter((g) => g.promo).sort((a, b) => b.promo - a.promo).slice(0, 15).map(line("brand", "thuong_hieu")),
+      muc_giam: [["duoi_10", 0, 0.1], ["10_19", 0.1, 0.2], ["20_29", 0.2, 0.3], ["30_49", 0.3, 0.5], ["tu_50", 0.5, 1]].map(([t, a, b]) => ({ muc: t, so_sku: offs.filter((v) => v >= a && v < b).length })),
+    };
+    const cmp = compareCalc();
+    if (cmp.P.length >= 2 && cmp.common.length) {
+      out.theo_tinh = { ghi_chu: "Chỉ số trên rổ SKU có giá ở mọi tỉnh; trung bình các tỉnh = 100", so_sku_ro_chung: cmp.common.length, tinh: cmp.P.map((p, k) => { const list = p.active.filter(cmp.ok); return { tinh: p.tinh, ngay_gia: p.latest, so_sku: list.length, ty_le_khuyen_mai: list.length ? p1(list.filter((x) => x.promo).length / list.length) : null, chi_so_gia_ban: r1(cmp.iF[k]), chi_so_gia_goc: r1(cmp.iB[k]) }; }) };
+      out.tinh_x_nganh = [...new Set(cmp.common.map((m) => m.x.cat))].slice(0, 30).map((c) => { const v = cmp.indexOf(cmp.common.filter((m) => m.x.cat === c), "final"), o = { nganh: c }; cmp.P.forEach((p, k) => (o[p.tinh] = r1(v[k]))); return o; });
+    }
+    if (C.dates.length >= 2) {
+      const t = trendCalc(rows);
+      if (t.basket) out.xu_huong = { ghi_chu: "Rổ cố định của tỉnh đang xem; lần đầu = 100", so_sku_ro: t.basket, ngay: C.dates, chi_so_gia_ban: t.sum.map((s) => r1((s[0] / t.sum[0][0]) * 100)), chi_so_gia_goc: t.sum.map((s) => r1((s[1] / t.sum[0][1]) * 100)), ty_le_sku_giam_gia: t.rate.map(r1) };
+      const moved = rows.map(changeOf).filter(Boolean);
+      out.thay_doi = { so_voi_ngay: C.prev, tang_gia: moved.filter((c) => c.d > 0).length, giam_gia: moved.filter((c) => c.d < 0).length, sku_moi: rows.filter((x) => x.first_seen === C.latest).length, sku_khong_con: C.items.filter((x) => x.last_seen === C.prev && (!F.cat || x.cat === F.cat) && (!F.brand || x.brand === F.brand)).length };
+    }
+    return out;
+  }
+
   // ---------- Cập nhật giá (Admin bấm nút) ----------
   let running = false;
   const STATUS = { running: "Đang lấy giá", saving: "Đang ghi dữ liệu", done: "Đã cập nhật xong", paused: "Tạm dừng", confirm: "Cần xác nhận" };
@@ -354,13 +388,13 @@ window.WMPrice = (function () {
   async function jobId() { const c = await API.priceConfig(); return c.job && c.job.id; }
 
   // Dữ liệu giá khá lớn nên chỉ tải khi mở tab lần đầu. Mở tab không tự gọi BHX.
-  let loaded = false;
+  let loaded = false, loading = Promise.resolve();
   function open(api, isAdmin) {
     API = api; wire();
     if (loaded) return;
     loaded = true;
     if (isAdmin) { wireAdmin(); loadAdmin(); }
-    reload().then(() => { if (!D && !$("#p-msg").textContent) render(); });
+    loading = reload().then(() => { if (!D && !$("#p-msg").textContent) render(); });
   }
-  return { open };
+  return { open, context, ready: () => loading };
 })();

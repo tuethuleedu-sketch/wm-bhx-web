@@ -9,12 +9,13 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611041513">
+  <link rel="stylesheet" href="style.css?v=202611041536">
 </head>
 <body>
   <!-- Đăng nhập -->
   <section id="login" class="login">
-    <form id="login-form" class="card login-card">
+    <div id="login-wait" class="card login-card"><h1>WM+ ↔ BHX</h1><p class="muted">Đang mở trang…</p></div>
+    <form id="login-form" class="card login-card" hidden>
       <h1>WM+ ↔ BHX</h1>
       <p class="muted">Bản đồ cạnh tranh theo bán kính. Chỉ email đã được Admin cấp quyền mới truy cập được. Quên mật khẩu thì nhờ Admin cấp lại.</p>
       <label>Email <input id="login-email" type="email" required placeholder="ten@gmail.com" autocomplete="email"></label>
@@ -171,6 +172,22 @@
         </tr></thead><tbody></tbody></table></div></div>
       </div>
 
+      <!-- Bot Claude: chỉ Admin -->
+      <div id="bot" data-admin>
+        <button id="bot-open">Hỏi Claude</button>
+        <aside id="bot-panel" class="card" hidden>
+          <div class="card-head"><h3>Hỏi Claude về giá đối thủ</h3><button class="link" id="bot-close" title="Đóng">✕</button></div>
+          <p class="muted small" id="bot-status"></p>
+          <div id="bot-log"></div>
+          <div id="bot-quick"></div>
+          <textarea id="bot-q" rows="2" maxlength="1000" placeholder="Hỏi về giá, khuyến mãi, ngành hàng, các tỉnh…"></textarea>
+          <label class="inline small"><input id="bot-agree" type="checkbox"> Đồng ý gửi câu hỏi và số tổng hợp bên dưới cho Claude (Anthropic)</label>
+          <details id="bot-preview" class="small"><summary>Xem số liệu sẽ gửi (theo bộ lọc ở tab Giá đối thủ)</summary><pre id="bot-data"></pre></details>
+          <div class="p-actions"><button id="bot-send">Gửi</button><span class="small err" id="bot-msg"></span></div>
+          <p class="muted small p-note">Chỉ gửi số tổng hợp giá đối thủ, không gửi tên SKU và dữ liệu WM. Không lưu lịch sử. Hãy đối chiếu nhận định với số trên báo cáo.</p>
+        </aside>
+      </div>
+
       <!-- Giá đối thủ -->
       <div id="view-price" class="view" hidden>
         <div class="card p-admin" data-admin>
@@ -303,13 +320,14 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611041513"></script>
-  <script src="demo-data.js?v=202611041513"></script>
-  <script src="gas-api.js?v=202611041513"></script>
-  <script src="upload.js?v=202611041513"></script>
-  <script src="area.js?v=202611041513"></script>
-  <script src="nearby.js?v=202611041513"></script>
-  <script src="price.js?v=202611041513"></script>
-  <script src="app.js?v=202611041513"></script>
+  <script src="config.js?v=202611041536"></script>
+  <script src="demo-data.js?v=202611041536"></script>
+  <script src="gas-api.js?v=202611041536"></script>
+  <script src="upload.js?v=202611041536"></script>
+  <script src="area.js?v=202611041536"></script>
+  <script src="nearby.js?v=202611041536"></script>
+  <script src="price.js?v=202611041536"></script>
+  <script src="bot.js?v=202611041536"></script>
+  <script src="app.js?v=202611041536"></script>
 </body>
 </html>

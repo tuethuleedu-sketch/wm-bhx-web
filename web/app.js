@@ -773,7 +773,7 @@
     $("#t-versions tbody").innerHTML = (await API.getVersions()).map((v) =>
       `<tr><td>${esc(v.version)}</td><td>${esc(v.uploaded)}</td><td>${esc(v.by)}</td><td class="num">${fmt(v.rows)}</td><td class="num">${v.added}</td><td class="num">${v.removed}</td><td class="num">${v.moved}</td><td>${esc(v.status)}</td></tr>`).join("");
   }
-  const EVENT = { login: "Đăng nhập", resume: "Mở lại phiên", logout: "Đăng xuất", denied: '<span class="tag close">Bị từ chối — chưa cấp quyền</span>', login_fail: '<span class="tag close">Sai mật khẩu</span>', pw_change: "Đổi mật khẩu", pw_reset: "Cấp mật khẩu tạm" };
+  const EVENT = { bot: "Hỏi Claude", price_refresh: "Cập nhật giá", login: "Đăng nhập", resume: "Mở lại phiên", logout: "Đăng xuất", denied: '<span class="tag close">Bị từ chối — chưa cấp quyền</span>', login_fail: '<span class="tag close">Sai mật khẩu</span>', pw_change: "Đổi mật khẩu", pw_reset: "Cấp mật khẩu tạm" };
   async function renderLog() {
     $("#t-log tbody").innerHTML = (await API.getAccessLog()).map((r) =>
       `<tr><td>${esc(new Date(r.at).toLocaleString("vi-VN"))}</td><td>${esc(r.email)}</td><td>${EVENT[r.event] || esc(r.event)}</td></tr>`).join("");
@@ -802,6 +802,7 @@
   }
   async function start(user) {
     S.user = user;
+    if (user.role === "admin") WMBot.init(API);
     $("#login").hidden = true; $("#app").hidden = false;
     $("#demo-banner").hidden = API.mode !== "demo";
     $("#user-email").textContent = user.email;
@@ -1046,7 +1047,15 @@
 
   // Còn phiên đăng nhập (trong cùng tab) → vào thẳng
   $("#login-retry-btn").addEventListener("click", () => location.reload());
-  API.currentUser().then((u) => u && start(u)).catch((err) => {
-    $("#login-form").hidden = true; $("#login-retry").hidden = false; $("#login-retry-msg").textContent = err.message;
+  // Còn phiên thì hiện "đang mở", không hiện ô mật khẩu trong lúc chờ máy chủ, để khỏi tưởng bị đăng xuất.
+  // Hết phiên mới hiện form, kèm lý do.
+  const showLoginForm = () => {
+    $("#login-wait").hidden = true; $("#login-form").hidden = false;
+    if (API.sessionNote) $("#login-msg").textContent = API.sessionNote;
+  };
+  if (API.hasSession && API.hasSession()) $("#login-wait").querySelector("p").textContent = "Bạn vẫn đang đăng nhập, đang tải dữ liệu…";
+  else showLoginForm();
+  API.currentUser().then((u) => { if (u) { $("#login-wait").hidden = true; start(u); } else showLoginForm(); }).catch((err) => {
+    $("#login-wait").hidden = true; $("#login-form").hidden = true; $("#login-retry").hidden = false; $("#login-retry-msg").textContent = err.message;
   });
 })();
