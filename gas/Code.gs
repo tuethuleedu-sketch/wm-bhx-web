@@ -30,6 +30,9 @@ const CFG = {
   MAX_CLOSE_RATIO: 0.30,     // guard đồng bộ BHX
   BBOX: [8.0, 24.5, 102.0, 110.0],
   UPLOAD_FOLDER: 'WM_BHX_uploads (tu xoa sau 48h)',
+  PRICE_MAX: 60000,          // số dòng tối đa của 1 file giá (SKU × số tỉnh)
+  PRICE_STEP_MS: 240000,     // mỗi lần gọi lấy giá chạy tối đa 4 phút, chừa thời gian ghi dữ liệu
+  PRICE_HIST_DAYS: 180,      // tab Giá đối thủ tải lịch sử 180 ngày gần nhất; dữ liệu cũ hơn vẫn được giữ trong Sheet
 };
 
 const TABS = {
@@ -41,6 +44,11 @@ const TABS = {
   comp_stores: ['chain', 'store_id', 'ten', 'dia_chi', 'tinh', 'lat', 'lng', 'first_seen', 'last_seen', 'is_active'],
   comp_changes: ['detected_on', 'chain', 'type', 'store_id', 'ten', 'dia_chi', 'tinh', 'lat', 'lng', 'old_lat', 'old_lng'],
   access_log:  ['at', 'email', 'event'],
+  price_skus:  ['id', 'code', 'name', 'cat', 'brand', 'unit', 'url', 'first_seen'],
+  price_items: ['chain', 'tinh', 'store', 'id', 'final', 'base', 'off', 'promo', 'title', 'can', 'first_seen', 'last_seen'],
+  price_hist:  ['date', 'tinh', 'id', 'final', 'base'],
+  price_tmp:   ['tinh', 'id', 'json'],
+  price_runs:  ['date', 'chain', 'tinh', 'store', 'uploaded_at', 'uploaded_by', 'file', 'n', 'n_new', 'n_gone', 'n_up', 'n_down'],
 };
 const WM_COLS = ['ma', 'ten', 'tinh', 'lat', 'lng', 'khu_vuc', 'chuoi', 'dia_chi', 'vung', 'mien', 'quan', 'phuong'];
 
@@ -82,11 +90,20 @@ function route_(req) {
   if (a === 'changes') return changes_();
   if (a === 'settings') return settings_();
   if (a === 'route') return roadRoute_(req.points);
+  if (a === 'prices') return prices_();
   // Chỉ Admin
-  if (['versions', 'publishWm', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
+  if (['versions', 'publishWm', 'publishPrices', 'priceConfig', 'savePriceConfig', 'priceTest', 'priceStart', 'priceStep', 'priceFinish', 'priceCancel', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
     if (u.role !== 'admin') throw new Error('Chỉ Admin được làm thao tác này');
     if (a === 'versions') return versions_();
     if (a === 'publishWm') return publishWm_(u, req.rows);
+    if (a === 'publishPrices') return publishPrices_(u, req.rows, req.meta, !!req.force);
+    if (a === 'priceConfig') return priceConfig_();
+    if (a === 'savePriceConfig') return savePriceConfig_(req.provinces);
+    if (a === 'priceTest') return priceTest_();
+    if (a === 'priceStart') return priceStart_(u);
+    if (a === 'priceStep') return priceStep_(u, req.jobId);
+    if (a === 'priceFinish') return priceFinish_(u, req.jobId);
+    if (a === 'priceCancel') return priceCancel_();
     if (a === 'listUsers') return listUsers_();
     if (a === 'addUser') return addUser_(u, req.email, req.role);
     if (a === 'removeUser') return removeUser_(u, req.email);
@@ -850,6 +867,290 @@ function accessLog_() {
 }
 
 // ───────────────────────── Cài đặt lần đầu ─────────────────────────
+// ───────────────────────── Giá đối thủ ─────────────────────────
+// Lưu lâu dài theo tỉnh. Chỉ nhận giá công khai của đối thủ, không lưu giá WM và không giữ token nào của đối thủ.
+// price_skus: thông tin SKU dùng chung. price_items: giá mới nhất của SKU ở từng tỉnh.
+// price_hist: chỉ thêm dòng khi SKU mới hoặc đổi giá để Sheet không phình nhanh.
+function ensurePriceTabs_() {
+  const ss = db_();
+  ['price_skus', 'price_items', 'price_hist', 'price_runs', 'price_tmp'].forEach(function (name) {
+    if (ss.getSheetByName(name)) return;
+    const s = ss.insertSheet(name);
+    s.getRange('A:Z').setNumberFormat('@');
+    s.getRange(1, 1, 1, TABS[name].length).setValues([TABS[name]]);
+    s.setFrozenRows(1);
+  });
+}
+function cleanPriceRow_(r) {
+  const text = function (v, n) { return String(v === undefined || v === null ? '' : v).trim().slice(0, n); };
+  const money = function (v) { const x = Number(v); return isFinite(x) && x > 0 ? Math.round(x) : 0; };
+  const off = Number(r.off), url = text(r.url, 500);
+  return { tinh: text(r.tinh, 60), store: text(r.store, 40), id: text(r.id, 40), code: text(r.code, 60), name: text(r.name, 300), cat: text(r.cat, 120), brand: text(r.brand, 120), unit: text(r.unit, 40),
+    url: /^https:\/\/www\.bachhoaxanh\.com\//.test(url) ? url : '', final: money(r.final), base: money(r.base),
+    off: isFinite(off) && off > 0 && off < 1 ? Math.round(off * 10000) / 10000 : 0, promo: r.promo ? 1 : 0, title: text(r.title, 200), can: r.can === false ? 0 : 1 };
+}
+function publishPrices_(u, rowsRaw, metaRaw, force) {
+  if (!Array.isArray(rowsRaw) || !rowsRaw.length) throw new Error('File không có SKU nào');
+  if (rowsRaw.length > CFG.PRICE_MAX) throw new Error('File quá lớn: tối đa ' + CFG.PRICE_MAX + ' dòng');
+  const rows = rowsRaw.map(cleanPriceRow_), seen = {}, byT = {};
+  rows.forEach(function (r, i) {
+    if (!r.id || !r.name || !r.tinh) throw new Error('Dòng ' + (i + 1) + ' thiếu tỉnh, mã hoặc tên SKU');
+    const k = r.tinh + '|' + r.id;
+    if (seen[k]) throw new Error('Trùng SKU ' + r.id + ' ở ' + r.tinh);
+    seen[k] = 1;
+    (byT[r.tinh] = byT[r.tinh] || []).push(r);
+  });
+  const meta = metaRaw || {}, today = todayVN_(), chain = 'BHX';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(meta.date || '')) ? String(meta.date) : today;
+  if (date > today) throw new Error('Ngày lấy giá ' + date + ' nằm trong tương lai');
+  return withLock_(function () {
+    ensurePriceTabs_();
+    const old = readRows_('price_items'), runs = readRows_('price_runs');
+    const lastOf = function (t) { return old.reduce(function (m, o) { return String(o.tinh) === t && String(o.last_seen) > m ? String(o.last_seen) : m; }, ''); };
+    // Kiểm tra hết các tỉnh trước khi ghi, để lỗi ở một tỉnh không làm dữ liệu lưu dở dang.
+    Object.keys(byT).forEach(function (t) {
+      const last = lastOf(t);
+      if (last > date) throw new Error(t + ' đã có giá ngày ' + last + ', mới hơn ngày ' + date + ' của file');
+      const active = old.filter(function (o) { return String(o.tinh) === t && String(o.last_seen) === last; }).length;
+      // File bị thiếu nhiều (token hết hạn giữa chừng...) mà vẫn lưu thì hàng loạt SKU bị coi là biến mất.
+      if (!force && active && byT[t].length < active * (1 - CFG.MAX_CLOSE_RATIO)) throw err_(t + ': file chỉ có ' + byT[t].length + ' SKU, ít hơn nhiều so với ' + active + ' SKU lần trước.', 'PRICE_SHRINK');
+    });
+    const items = old.filter(function (o) { return !byT[String(o.tinh)]; }), hist = [], newRuns = [], summary = [];
+    Object.keys(byT).forEach(function (t) {
+      const last = lastOf(t), mine = old.filter(function (o) { return String(o.tinh) === t; }), prev = {};
+      mine.forEach(function (o) { prev[String(o.id)] = o; });
+      // Tải lại trong cùng ngày: SKU không có ở file sau được đưa về ngày lấy giá trước đó, hoặc bỏ nếu mới xuất hiện hôm nay.
+      const earlier = runs.filter(function (x) { return String(x.tinh) === t && String(x.date) < date; }).reduce(function (m, x) { return String(x.date) > m ? String(x.date) : m; }, '');
+      let added = 0, up = 0, down = 0, gone = 0;
+      mine.forEach(function (o) {
+        if (seen[t + '|' + String(o.id)]) return;
+        if (String(o.last_seen) === last) gone++;
+        if (String(o.last_seen) !== date) { items.push(o); return; }
+        if (String(o.first_seen) !== date && earlier) { o.last_seen = earlier; items.push(o); }
+      });
+      byT[t].forEach(function (r) {
+        const o = prev[r.id], f = String(r.final), b = String(r.base);
+        if (!o) added++;
+        else if (Number(o.final) && r.final > Number(o.final)) up++;
+        else if (Number(o.final) && r.final < Number(o.final)) down++;
+        if (!o || String(o.final) !== f || String(o.base) !== b) hist.push({ date: date, tinh: t, id: r.id, final: f, base: b });
+        items.push({ chain: chain, tinh: t, store: r.store, id: r.id, final: f, base: b, off: String(r.off), promo: String(r.promo), title: r.title, can: String(r.can), first_seen: o ? o.first_seen : date, last_seen: date });
+      });
+      newRuns.push({ date: date, chain: chain, tinh: t, store: byT[t][0].store, uploaded_at: nowIso_(), uploaded_by: u.email, file: String(meta.file || '').slice(0, 120),
+        n: String(byT[t].length), n_new: String(added), n_gone: String(gone), n_up: String(up), n_down: String(down) });
+      summary.push({ tinh: t, rows: byT[t].length, added: added, gone: gone, up: up, down: down });
+    });
+    const skus = {};
+    readRows_('price_skus').forEach(function (s) { skus[String(s.id)] = s; });
+    rows.forEach(function (r) {
+      const s = skus[r.id];
+      skus[r.id] = { id: r.id, code: r.code, name: r.name, cat: r.cat, brand: r.brand, unit: r.unit, url: r.url, first_seen: s ? s.first_seen : date };
+    });
+    writeAll_('price_skus', Object.keys(skus).map(function (k) { return skus[k]; }));
+    writeAll_('price_items', items);
+    append_('price_hist', hist);
+    append_('price_runs', newRuns);
+    return { date: date, rows: rows.length, provinces: summary };
+  });
+}
+// Giá 180 ngày gần nhất, kèm giá ngay trước mốc đó của từng SKU ở từng tỉnh để vẽ được xu hướng từ đầu kỳ.
+function prices_() {
+  if (!db_().getSheetByName('price_items')) return { skus: [], items: [], runs: [], hist: [] };
+  const since = Utilities.formatDate(new Date(Date.now() - CFG.PRICE_HIST_DAYS * 864e5), CFG.TZ, 'yyyy-MM-dd');
+  const before = {}, hist = [];
+  readRows_('price_hist').forEach(function (h) {
+    const row = [String(h.date), String(h.tinh), String(h.id), Number(h.final) || 0, Number(h.base) || 0];
+    if (row[0] < since) before[row[1] + '|' + row[2]] = row; else hist.push(row);
+  });
+  return {
+    skus: readRows_('price_skus').map(function (s) { return { id: String(s.id), code: String(s.code), name: String(s.name), cat: String(s.cat), brand: String(s.brand), unit: String(s.unit), url: String(s.url) }; }),
+    items: readRows_('price_items').map(function (o) {
+      return { tinh: String(o.tinh), store: String(o.store), id: String(o.id), final: Number(o.final) || 0, base: Number(o.base) || 0, off: Number(o.off) || 0, promo: String(o.promo) === '1', title: String(o.title), can: String(o.can) !== '0', first_seen: String(o.first_seen), last_seen: String(o.last_seen) };
+    }),
+    runs: readRows_('price_runs').map(function (x) { return { date: String(x.date), at: String(x.uploaded_at), tinh: String(x.tinh), store: String(x.store), file: String(x.file), by: String(x.uploaded_by), n: Number(x.n) || 0, added: Number(x.n_new) || 0, gone: Number(x.n_gone) || 0, up: Number(x.n_up) || 0, down: Number(x.n_down) || 0 }; }),
+    hist: Object.keys(before).map(function (k) { return before[k]; }).concat(hist),
+  };
+}
+
+// ───────────────────────── Cập nhật giá BHX khi Admin bấm nút ─────────────────────────
+// Không có lịch tự chạy. Token do Admin tự nhập ở Script Properties, không bao giờ trả về trình duyệt và không ghi vào log.
+// Mỗi lần gọi chạy tối đa PRICE_STEP_MS (Apps Script giới hạn 6 phút) rồi trình duyệt gọi tiếp. Tiến độ lưu lại nên lỗi hay đóng tab đều tiếp tục được.
+// Chỉ khi lấy đủ mọi ngành của mọi tỉnh mới ghi vào dữ liệu chính; giữa chừng dữ liệu cũ không đổi.
+const PRICE_URL = 'https://api.bachhoaxanh.com/gw/Category/AjaxProduct';
+const PRICE_PAGE = 10, PRICE_RETRY = 3, PRICE_DELAY_MS = 300, PRICE_JOB = 'price_job', PRICE_CFG = 'price_cfg';
+const PRICE_SECRETS = { authorization: 'BHX_AUTHORIZATION', accesstoken: 'BHX_ACCESSTOKEN', 'customer-id': 'BHX_CUSTOMER_ID', deviceid: 'BHX_DEVICEID', devicetoken: 'BHX_DEVICETOKEN', username: 'BHX_USERNAME', xapikey: 'BHX_XAPIKEY' };
+const PRICE_DEFAULT = [{ tinh: 'Hồ Chí Minh', provinceId: '', wardId: '', storeId: '' }, { tinh: 'Hà Nội', provinceId: '', wardId: '', storeId: '' }, { tinh: 'Cần Thơ', provinceId: '', wardId: '', storeId: '' }];
+const PRICE_CATS = [10338, 10340, 11238, 2282, 2286, 2289, 2382, 2385, 2386, 2387, 2388, 2403, 2443, 2444, 2446, 2463, 2464, 2465, 2483, 2484, 2485, 2486, 2490, 2491, 2493, 2504, 2507, 2510, 2511, 2513, 2516, 2517, 2519, 2524, 2526, 2530, 2563, 2564, 2565, 2566, 2567, 2683, 2687, 2787, 2803, 2804, 2806, 2809, 2883, 2903, 2943, 2944, 2947, 2965, 3003, 3004, 3023, 3027, 3028, 3063, 3104, 3124, 3187, 3188, 3226, 3233, 3234, 3235, 3237, 3238, 3265, 3345, 3357, 3358, 3359, 3360, 3361, 3362, 3364, 3365, 3368, 3465, 3485, 3487, 3507, 3525, 3708, 3727, 3728, 3732, 3740, 4326, 4352, 4585, 4888, 4929, 5226, 5436, 56, 5872, 6553, 6562, 6597, 6653, 6658, 7068, 7082, 7083, 7086, 7143, 7162, 7170, 7171, 7199, 7259, 7459, 7462, 7478, 7480, 7558, 7579, 7618, 7622, 7694, 7779, 8139, 8158, 8159, 8160, 8163, 8271, 8275, 8285, 8286, 8318, 8320, 8338, 8400, 8638, 8678, 8779, 8781, 8782, 8783, 8785, 8788, 8790, 8820, 8938, 8966, 9027, 9081, 9498];
+
+function priceProps_() { return PropertiesService.getScriptProperties(); }
+function priceMissing_() { return Object.keys(PRICE_SECRETS).map(function (h) { return PRICE_SECRETS[h]; }).filter(function (k) { return !priceProps_().getProperty(k); }); }
+function priceProvinces_() { const v = priceProps_().getProperty(PRICE_CFG); return v ? JSON.parse(v) : PRICE_DEFAULT; }
+function priceReady_(p) { return !!(p.tinh && p.provinceId && p.wardId && p.storeId); }
+function priceLoadJob_() { const v = priceProps_().getProperty(PRICE_JOB); return v ? JSON.parse(v) : null; }
+function priceSaveJob_(j) { j.updated_at = nowIso_(); priceProps_().setProperty(PRICE_JOB, JSON.stringify(j)); return priceJobOut_(j); }
+function priceJobOut_(j) {
+  if (!j) return null;
+  const total = j.provinces.length * PRICE_CATS.length, done = j.pi * PRICE_CATS.length + j.ci;
+  return { id: j.id, status: j.status, date: j.date, msg: j.msg || '', tinh: j.provinces[j.pi] ? j.provinces[j.pi].tinh : '', done: Math.min(done, total), total: total, rows: j.rows, summary: j.summary || null };
+}
+function priceConfig_() {
+  const job = priceLoadJob_();
+  return { provinces: priceProvinces_(), missing: priceMissing_(), job: priceJobOut_(job) };
+}
+function savePriceConfig_(raw) {
+  if (!Array.isArray(raw) || !raw.length || raw.length > 10) throw new Error('Cần từ 1 đến 10 tỉnh');
+  const job = priceLoadJob_();
+  if (job && job.status !== 'done') throw new Error('Đang có lần cập nhật dở dang. Huỷ lần đó trước khi đổi thiết lập.');
+  const seen = {}, out = raw.map(function (p) {
+    const o = { tinh: String(p.tinh || '').trim().slice(0, 60), provinceId: String(p.provinceId || '').trim(), wardId: String(p.wardId || '').trim(), storeId: String(p.storeId || '').trim() };
+    if (!o.tinh) throw new Error('Thiếu tên tỉnh');
+    if (seen[o.tinh]) throw new Error('Trùng tỉnh: ' + o.tinh);
+    seen[o.tinh] = 1;
+    ['provinceId', 'wardId', 'storeId'].forEach(function (k) { if (!/^\d{1,12}$/.test(o[k])) throw new Error(o.tinh + ': ' + k + ' phải là số'); });
+    return o;
+  });
+  priceProps_().setProperty(PRICE_CFG, JSON.stringify(out));
+  return priceConfig_();
+}
+function priceHeaders_() {
+  const h = { Accept: 'application/json, text/plain, */*', Origin: 'https://www.bachhoaxanh.com', Referer: 'https://www.bachhoaxanh.com/', 'referer-url': 'https://www.bachhoaxanh.com/', platform: 'webnew', reversehost: 'http://bhxapi.live' };
+  Object.keys(PRICE_SECRETS).forEach(function (k) { h[k] = priceProps_().getProperty(PRICE_SECRETS[k]); });
+  return h;
+}
+// Thông báo lỗi không chứa header hay token.
+function priceFetch_(headers, prov, cat, page) {
+  const payload = { provinceId: Number(prov.provinceId), wardId: Number(prov.wardId), districtId: 0, storeId: Number(prov.storeId), CategoryId: cat, SelectedBrandId: '', PropertyIdList: '', SortStr: '', PropertySelected: [],
+    PageIndex: page, PageSize: PRICE_PAGE, PriorityProductIds: '', LastShowProductId: 0 };
+  let last = '';
+  for (let a = 0; a < PRICE_RETRY; a++) {
+    if (a) Utilities.sleep(2000 * a);
+    let res = null;
+    try { res = UrlFetchApp.fetch(PRICE_URL, { method: 'post', contentType: 'application/json', headers: headers, payload: JSON.stringify(payload), muteHttpExceptions: true }); }
+    catch (_) { last = 'không kết nối được'; continue; }
+    const code = res.getResponseCode();
+    if (code === 401 || code === 403) throw err_('BHX từ chối (' + code + '): token có thể đã hết hạn hoặc BHX chặn lệnh gọi từ máy chủ Google. Thay token rồi bấm Tiếp tục.', 'PRICE_STOP');
+    if (code === 429) throw err_('BHX báo gọi quá nhiều (429). Đợi một lúc rồi bấm Tiếp tục.', 'PRICE_STOP');
+    if (code !== 200) { last = 'HTTP ' + code; continue; }
+    try { const d = JSON.parse(res.getContentText()); return (d.data && d.data.products) || []; } catch (_) { last = 'phản hồi không phải JSON'; }
+  }
+  throw new Error('Ngành ' + cat + ' của ' + prov.tinh + ' lỗi: ' + last);
+}
+// Cùng quy tắc với notebook và file Excel: mức giảm tính từ giá; không tính được mới dùng % của API.
+function priceRow_(raw, prov) {
+  const d = raw && raw.data ? raw.data : raw, num = function (v) { const x = Number(v); return isFinite(x) ? x : 0; };
+  const pr = Array.isArray(d.productPrices) && d.productPrices[0] ? d.productPrices[0] : {}, camp = d.campaignInfo || d.promotionInfo || null;
+  const price = num(pr.price !== undefined ? pr.price : d.price), sys = num(pr.sysPrice !== undefined ? pr.sysPrice : (d.sysPrice || d.originalPrice)), flash = camp ? num(camp.price) : 0;
+  const final = flash > 0 && flash < price ? flash : price, base = sys > final ? sys : price;
+  let off = base > 0 && final > 0 ? 1 - final / base : 0;
+  if (off < 0.005) off = num((camp && camp.discountPercent) || (pr.discountPercent !== undefined ? pr.discountPercent : d.discountPercent)) / 100;
+  if (!(off > 0 && off < 1)) off = 0;
+  const title = String((camp ? camp.title || camp.name : d.promotionText) || '').trim();
+  return { tinh: prov.tinh, store: prov.storeId, id: String(d.id === undefined || d.id === null ? '' : d.id), code: d.productCode || d.barcode || '', name: d.name || d.productName || '', cat: d.categoryName || '', brand: d.brandName || '', unit: d.unitName || d.quantityUnit || '',
+    url: d.url ? 'https://www.bachhoaxanh.com' + d.url : '', final: final, base: base, off: off, promo: off > 0 || title !== '' || !!camp, can: d.isCanBuy !== false, title: title };
+}
+// Thử kết nối: chỉ trả số đếm, không lưu gì.
+function priceTest_() {
+  const miss = priceMissing_();
+  if (miss.length) throw new Error('Thiếu trong Script Properties: ' + miss.join(', '));
+  const headers = priceHeaders_();
+  return priceProvinces_().map(function (p) {
+    if (!priceReady_(p)) return { tinh: p.tinh, ok: false, msg: 'Chưa điền đủ mã' };
+    try {
+      for (let c = 0; c < 5; c++) {
+        const list = priceFetch_(headers, p, PRICE_CATS[c], 0);
+        if (list.length) {
+          const rows = list.map(function (x) { return priceRow_(x, p); });
+          return { tinh: p.tinh, ok: rows.some(function (r) { return r.final > 0; }), sku: rows.length, withPrice: rows.filter(function (r) { return r.final > 0; }).length, withCat: rows.filter(function (r) { return r.cat; }).length, withBrand: rows.filter(function (r) { return r.brand; }).length };
+        }
+      }
+      return { tinh: p.tinh, ok: false, msg: 'BHX không trả SKU nào ở 5 ngành đầu' };
+    } catch (e) { return { tinh: p.tinh, ok: false, msg: e.message }; }
+  });
+}
+function priceTmpClear_() { const s = db_().getSheetByName('price_tmp'); if (s) writeAll_('price_tmp', []); }
+// Bấm Cập nhật: có lần dở dang của hôm nay thì chạy tiếp, nếu không thì bắt đầu lần mới.
+function priceStart_(u) {
+  const miss = priceMissing_();
+  if (miss.length) throw new Error('Thiếu trong Script Properties: ' + miss.join(', '));
+  const provinces = priceProvinces_();
+  provinces.forEach(function (p) { if (!priceReady_(p)) throw new Error(p.tinh + ': chưa điền đủ provinceId, wardId, storeId'); });
+  return withLock_(function () {
+    const old = priceLoadJob_();
+    if (old && old.status !== 'done' && old.date === todayVN_()) {
+      if (old.status === 'paused') old.status = old.pi >= old.provinces.length ? 'saving' : 'running';
+      old.msg = '';
+      return priceSaveJob_(old);
+    }
+    ensurePriceTabs_();
+    priceTmpClear_();
+    log_(u.email, 'price_refresh');
+    return priceSaveJob_({ id: Utilities.getUuid(), by: u.email, date: todayVN_(), provinces: provinces, pi: 0, ci: 0, page: 0, added: 0, rows: 0, counts: {}, status: 'running', msg: '' });
+  });
+}
+function priceStep_(u, jobId) {
+  const job = priceLoadJob_();
+  if (!job || job.id !== jobId) throw new Error('Lần cập nhật này không còn. Bấm Cập nhật để bắt đầu lại.');
+  if (job.status !== 'running' && job.status !== 'saving') return priceJobOut_(job);
+  const cache = CacheService.getScriptCache();
+  if (cache.get('price_step')) return priceJobOut_(job);          // một lần gọi khác đang chạy
+  cache.put('price_step', '1', 360);
+  try {
+    if (job.status === 'saving') return priceSave_(u, job, false);
+    ensurePriceTabs_();
+    const started = Date.now(), headers = priceHeaders_(), buffer = [], seen = {};
+    readRows_('price_tmp').forEach(function (r) { seen[r.tinh + '|' + r.id] = 1; });
+    try {
+      while (job.pi < job.provinces.length && Date.now() - started < CFG.PRICE_STEP_MS) {
+        const prov = job.provinces[job.pi], cat = PRICE_CATS[job.ci];
+        const list = priceFetch_(headers, prov, cat, job.page);
+        const fresh = list.map(function (x) { return priceRow_(x, prov); }).filter(function (r) { const k = r.tinh + '|' + r.id; if (!r.id || !r.name || seen[k]) return false; seen[k] = 1; return true; });
+        fresh.forEach(function (r) { buffer.push({ tinh: r.tinh, id: r.id, json: JSON.stringify(r) }); });
+        job.counts[prov.tinh] = (job.counts[prov.tinh] || 0) + fresh.length;
+        job.rows += fresh.length;
+        if (list.length === PRICE_PAGE && fresh.length) job.page++;
+        else {
+          job.page = 0; job.ci++;
+          if (job.ci >= PRICE_CATS.length) { job.ci = 0; job.pi++; }
+        }
+        Utilities.sleep(PRICE_DELAY_MS);
+      }
+      if (job.pi >= job.provinces.length) {
+        const empty = job.provinces.filter(function (p) { return !job.counts[p.tinh]; }).map(function (p) { return p.tinh; });
+        if (empty.length) { job.status = 'paused'; job.msg = 'BHX không trả SKU nào cho: ' + empty.join(', ') + '. Kiểm tra lại mã tỉnh, phường, cửa hàng. Dữ liệu cũ giữ nguyên.'; }
+        else job.status = 'saving';
+      }
+    } catch (e) {
+      job.status = 'paused';
+      job.msg = e.message + ' Dữ liệu cũ giữ nguyên.';
+    }
+    append_('price_tmp', buffer);
+    return priceSaveJob_(job);
+  } finally { cache.remove('price_step'); }
+}
+function priceSave_(u, job, force) {
+  const rows = readRows_('price_tmp').map(function (r) { return JSON.parse(String(r.json)); });
+  try {
+    job.summary = publishPrices_(u, rows, { file: 'Cập nhật trực tiếp', date: job.date }, force);
+    job.status = 'done'; job.msg = '';
+    priceTmpClear_();
+  } catch (e) {
+    if (e.code !== 'PRICE_SHRINK') { job.status = 'paused'; job.msg = e.message; return priceSaveJob_(job); }
+    job.status = 'confirm'; job.msg = e.message;
+  }
+  return priceSaveJob_(job);
+}
+function priceFinish_(u, jobId) {
+  const job = priceLoadJob_();
+  if (!job || job.id !== jobId || job.status !== 'confirm') throw new Error('Không có lần cập nhật nào đang chờ xác nhận');
+  return priceSave_(u, job, true);
+}
+function priceCancel_() {
+  priceTmpClear_();
+  priceProps_().deleteProperty(PRICE_JOB);
+  return priceConfig_();
+}
+
+// ───────────────────────── Thiết lập ─────────────────────────
 function setup() {
   const ss = db_();
   if (!ss) throw new Error('Không tìm thấy Sheet — điền SHEET_ID ở đầu file');
