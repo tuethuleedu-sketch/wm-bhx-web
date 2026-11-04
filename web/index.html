@@ -9,7 +9,7 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611041318">
+  <link rel="stylesheet" href="style.css?v=202611041513">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -57,6 +57,7 @@
       <nav id="tabs">
         <button data-view="overview" class="active">Tổng quan</button>
         <button data-view="changes">Thay đổi đối thủ</button>
+        <button data-view="price">Giá đối thủ</button>
         <button data-view="wm" data-admin>WM+ (upload)</button>
         <button data-view="admin" data-admin>Phân quyền</button>
       </nav>
@@ -98,7 +99,7 @@
             <button class="ghost" id="rt-gps">Vị trí của tôi</button>
             <label>Phương tiện <select id="rt-mode"><option value="two-wheeler">Xe máy</option><option value="driving">Ô tô</option><option value="line">Đường thẳng (không gửi Google)</option></select></label>
             <label>Số WM <input id="rt-n" type="number" min="0" max="50" step="1" value="10"></label>
-            <label title="Lấy từ các chuỗi đối thủ đang bật ở trên">Số đối thủ <input id="rt-nc" type="number" min="0" max="50" step="1" value="0"></label>
+            <label title="Lấy từ các chuỗi đối thủ đang bật ở trên">Số đối thủ <input id="rt-nc" type="number" min="0" max="50" step="1" value="5"></label>
             <button id="rt-go">Lập tuyến</button>
             <button class="ghost" id="rt-clear" hidden>Xoá tuyến</button>
             <span class="muted" id="rt-msg"></span>
@@ -119,8 +120,10 @@
         <div class="card map-card" id="map-card">
           <div id="map"></div>
           <aside id="area-panel" class="area-panel" hidden></aside>
+          <div class="map-hint" id="map-hint" hidden>Giữ Ctrl và lăn chuột để phóng to, thu nhỏ bản đồ</div>
           <div class="map-tools">
             <button class="map-full" id="map-notes" title="Hiện hoặc ẩn ghi chú % theo tỉnh trên bản đồ">Ẩn ghi chú tỉnh</button>
+            <button class="map-full" id="map-fit" title="Đưa cả tuyến, hoặc cả khu vực đang lọc, vào khung nhìn">Xem cả tuyến/khu vực</button>
             <button class="map-full" id="map-full" title="Phóng to toàn màn hình">⛶ Toàn màn hình</button>
           </div>
           <div class="legend small">
@@ -166,6 +169,86 @@
         <div class="card"><div class="table-wrap tall"><table id="t-changes"><thead><tr>
           <th>Ngày phát hiện</th><th>Đối thủ</th><th>Loại</th><th>Mã</th><th>Địa chỉ</th><th>Tỉnh</th><th class="num">WM+ trong 2 km</th><th class="num">WM+ gần nhất (km)</th>
         </tr></thead><tbody></tbody></table></div></div>
+      </div>
+
+      <!-- Giá đối thủ -->
+      <div id="view-price" class="view" hidden>
+        <div class="card p-admin" data-admin>
+          <div class="p-actions">
+            <button id="p-refresh">Cập nhật giá</button>
+            <button class="ghost" id="p-test">Thử kết nối</button>
+            <button class="ghost" id="p-confirm" hidden>Vẫn lưu</button>
+            <button class="ghost" id="p-cancel" hidden>Huỷ lần này</button>
+            <span class="small" id="p-job"></span>
+          </div>
+          <p class="muted small p-note">Giá chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Mỗi lần có thể mất 15–30 phút, cần giữ tab này mở; lỡ đóng tab thì bấm lại để chạy tiếp. Dữ liệu cũ giữ nguyên cho tới khi lấy đủ.</p>
+          <details id="p-setup"><summary>Thiết lập tỉnh và token</summary>
+            <p class="small" id="p-keys"></p>
+            <div class="table-wrap"><table id="t-p-cfg"><thead><tr><th>Tỉnh</th><th>provinceId</th><th>wardId</th><th>storeId</th><th></th></tr></thead><tbody></tbody></table></div>
+            <div class="p-actions"><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
+          </details>
+          <details><summary>Tải file giá từ notebook (dự phòng)</summary>
+            <div class="p-upload">
+              <label>File giá BHX (.xlsx) <input id="p-file" type="file" accept=".xlsx"></label>
+              <button id="p-save" hidden>Lưu vào hệ thống</button>
+            </div>
+          </details>
+          <p class="muted small p-note">Chỉ lưu giá đối thủ, không lưu giá WM. Dữ liệu được giữ lâu dài, không tự xoá sau 48 giờ.</p>
+        </div>
+        <div class="controls card">
+          <label>Tỉnh <select id="p-tinh"></select></label>
+          <label>Ngành hàng <select id="p-cat"><option value="">Tất cả</option></select></label>
+          <label>Thương hiệu <select id="p-brand"><option value="">Tất cả</option></select></label>
+          <label>Tìm SKU <input id="p-q" type="search" placeholder="Tên hoặc mã"></label>
+          <label class="inline"><input id="p-promo" type="checkbox"> Chỉ SKU có khuyến mãi</label>
+          <span class="muted small" id="p-msg"></span>
+        </div>
+        <div class="card" id="p-empty"><h3>Chưa có dữ liệu giá</h3><p class="muted">Admin điền thiết lập tỉnh và token, rồi bấm Cập nhật giá.</p></div>
+        <div id="p-report" hidden>
+          <p class="card small" id="p-source"></p>
+          <p class="err small" id="p-quality" hidden></p>
+          <div class="card" id="p-compare"><h3>So sánh giá giữa các tỉnh</h3>
+            <p class="muted small" id="p-compare-need" hidden>Cần dữ liệu của ít nhất 2 tỉnh.</p>
+            <div id="p-compare-body">
+              <p class="muted small" id="p-compare-note"></p>
+              <div class="p-two">
+                <div class="table-wrap"><table id="t-p-prov"><thead><tr><th>Tỉnh</th><th>Cửa hàng</th><th>Ngày giá</th><th class="num">SKU</th><th class="num">% có KM</th><th class="num">Chỉ số giá bán</th><th class="num">Chỉ số giá gốc</th></tr></thead><tbody></tbody></table></div>
+                <div class="table-wrap"><table id="t-p-matrix"><thead></thead><tbody></tbody></table></div>
+              </div>
+              <h4>SKU chênh giá nhiều nhất giữa các tỉnh</h4>
+              <div class="table-wrap"><table id="t-p-gap"><thead></thead><tbody></tbody></table></div>
+            </div>
+          </div>
+          <div class="kpis six" id="p-kpis"></div>
+          <div class="p-two">
+            <div class="card"><h3>Chỉ số giá BHX theo thời gian</h3>
+              <p class="muted small" id="p-trend-need">Cần ít nhất 2 lần tải file ở 2 ngày khác nhau.</p>
+              <div id="p-trend-body" hidden><p class="muted small"><span id="p-basket-n"></span> Giá gốc tăng mới là tăng giá thật; giá bán còn thay đổi theo khuyến mãi. Rê chuột vào điểm để xem số.</p><div id="p-index" class="p-chart"></div></div>
+            </div>
+            <div class="card"><h3>% SKU giảm giá theo thời gian</h3>
+              <p class="muted small">Cường độ giảm giá của BHX qua các lần lấy giá, theo ngành và thương hiệu đang lọc.</p>
+              <div id="p-rate" class="p-chart"></div>
+            </div>
+          </div>
+          <div class="card"><h3>Thay đổi so với lần trước</h3>
+            <p class="muted small" id="p-change-need">Cần ít nhất 2 lần tải file ở 2 ngày khác nhau.</p>
+            <div id="p-change-body" hidden><p class="small" id="p-change-sum"></p><div class="table-wrap"><table id="t-p-change"><thead><tr><th>SKU đổi giá mạnh nhất</th><th>Ngành</th><th class="num">Giá trước (đ)</th><th class="num">Giá nay (đ)</th><th class="num">Thay đổi</th></tr></thead><tbody></tbody></table></div></div>
+          </div>
+          <div class="p-two">
+            <div class="card"><h3>% SKU có khuyến mãi theo ngành</h3><p class="muted small">15 ngành cao nhất. Bấm một ngành để lọc.</p><div id="p-cats"></div></div>
+            <div class="card"><h3>Số SKU theo mức giảm</h3><p class="muted small">Chỉ tính SKU có giảm giá.</p><div id="p-dist"></div></div>
+          </div>
+          <div class="p-two">
+            <div class="card"><h3>Chi tiết theo ngành</h3><div class="table-wrap"><table id="t-p-cat"><thead><tr><th>Ngành</th><th class="num">Số SKU</th><th class="num">% có KM</th><th class="num">Giảm trung vị</th><th class="num">Giá trung vị (đ)</th></tr></thead><tbody></tbody></table></div></div>
+            <div class="card"><h3>Thương hiệu khuyến mãi nhiều nhất</h3><div class="table-wrap"><table id="t-p-brand"><thead><tr><th>Thương hiệu</th><th class="num">SKU có KM</th><th class="num">Số SKU</th><th class="num">% có KM</th><th class="num">Giảm trung vị</th></tr></thead><tbody></tbody></table></div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Danh sách SKU, giảm sâu trước <span class="muted small" id="p-count"></span></h3><button class="ghost" id="p-export">Xuất CSV</button></div>
+            <div class="table-wrap tall"><table id="t-p-sku"><thead><tr><th>SKU</th><th>Ngành</th><th>Thương hiệu</th><th>Đơn vị</th><th class="num">Giá hiện tại (đ)</th><th class="num">Giá gốc (đ)</th><th class="num">% giảm</th><th class="num">So lần trước</th><th>Khuyến mãi</th><th>Tình trạng</th></tr></thead><tbody></tbody></table></div>
+            <div class="pager small" id="p-pager"></div>
+          </div>
+          <div class="card"><details><summary>Lịch sử các lần tải file</summary><div class="table-wrap"><table id="t-p-runs"><thead><tr><th>Ngày</th><th>Tỉnh</th><th>File</th><th>Cửa hàng</th><th>Người tải</th><th class="num">SKU</th><th class="num">Mới</th><th class="num">Tăng</th><th class="num">Giảm</th><th class="num">Không còn</th></tr></thead><tbody></tbody></table></div></details></div>
+        </div>
       </div>
 
       <!-- Upload WM+ -->
@@ -220,12 +303,13 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611041318"></script>
-  <script src="demo-data.js?v=202611041318"></script>
-  <script src="gas-api.js?v=202611041318"></script>
-  <script src="upload.js?v=202611041318"></script>
-  <script src="area.js?v=202611041318"></script>
-  <script src="nearby.js?v=202611041318"></script>
-  <script src="app.js?v=202611041318"></script>
+  <script src="config.js?v=202611041513"></script>
+  <script src="demo-data.js?v=202611041513"></script>
+  <script src="gas-api.js?v=202611041513"></script>
+  <script src="upload.js?v=202611041513"></script>
+  <script src="area.js?v=202611041513"></script>
+  <script src="nearby.js?v=202611041513"></script>
+  <script src="price.js?v=202611041513"></script>
+  <script src="app.js?v=202611041513"></script>
 </body>
 </html>

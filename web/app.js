@@ -215,13 +215,26 @@
   // ---------- Bản đồ ----------
   let map, wmMarkers = [], bhxLayer, ringLayer, bhxAllLayer, bhxAllMarkers = [];
   function initMap() {
-    map = L.map("map", { preferCanvas: true, renderer: L.canvas({ tolerance: 5 }) }).setView([20.8, 106.2], 9);
+    map = L.map("map", { preferCanvas: true, renderer: L.canvas({ tolerance: 5 }), scrollWheelZoom: false }).setView([20.8, 106.2], 9);
+    wheelGuard();
     // OSM chặn tile (403) nếu thiếu Referer; trang đặt no-referrer → riêng tile gửi origin (chỉ tên miền, không đường dẫn).
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       { maxZoom: 18, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
     bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map); noteLayer = L.layerGroup().addTo(map);
     map.on("popupclose", () => (popupClosedAt = Date.now()));
     syncPick(); rtHint();
+  }
+  // Lăn chuột là cuộn trang, không làm bản đồ đổi cỡ. Phóng to/thu nhỏ: giữ Ctrl khi lăn, chụm 2 ngón trên touchpad, nút +/−, hoặc lăn tự do khi toàn màn hình.
+  function wheelGuard() {
+    let timer = 0;
+    map.getContainer().addEventListener("wheel", (e) => {
+      const hint = $("#map-hint");
+      if (e.ctrlKey || e.metaKey || $("#map-card").classList.contains("map-max")) {
+        e.preventDefault(); map.scrollWheelZoom.enable(); hint.hidden = true; return;
+      }
+      map.scrollWheelZoom.disable();
+      hint.hidden = false; clearTimeout(timer); timer = setTimeout(() => (hint.hidden = true), 1500);
+    }, { capture: true, passive: false });
   }
   // Ghi chú trên bản đồ: % WM có đối thủ trong R và Pressure của từng tỉnh, đặt ở tâm các WM của tỉnh đó. Bấm để lọc tỉnh.
   let noteLayer, showNotes = true;
@@ -258,12 +271,21 @@
     S.bhx.forEach((b, j) => { if (inProv(b)) bhxAllLayer.addLayer(bhxAllMarkers[j]); });
   }
   // Thu phóng vừa bộ lọc (WM + đối thủ của tỉnh); không lọc tỉnh → vừa WM, chưa có WM thì vừa toàn bộ đối thủ.
-  // withComp: vừa cả đối thủ đang bật — dùng khi đổi nút lọc, vì chuỗi mới bật có thể nằm ngoài khung đang xem.
-  function fitScope(withComp) {
+  function fitScope() {
     let pts = scopeIdx().map((i) => S.wm[i]);
-    if (RT && RT.stops.length) { fitRoute(); return; }   // đang có tuyến thì giữ khung nhìn theo tuyến
-    if (S.tinh.size || S.quan.size || S.phuong.size || S.mien.size || S.vung.size || withComp) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
+    if (S.tinh.size || S.quan.size || S.phuong.size || S.mien.size || S.vung.size) pts = pts.concat(S.bhx.filter(inProv)); else if (!pts.length) pts = S.bhx;
     if (pts.length) map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [20, 20], maxZoom: 14 });
+  }
+  // Đổi khu vực lọc: đang có tuyến thì buildRoute đã lo khung nhìn. Đang tích trong danh sách chọn nhiều thì đợi đóng danh sách mới đưa bản đồ tới, một lần.
+  let pendingFit = false;
+  const listOpen = () => !!document.activeElement && document.activeElement.dataset.open === "1";
+  function areaFit() {
+    if (listOpen()) { pendingFit = true; return; }
+    if (!RT || !RT.stops.length) fitScope();
+  }
+  function afterListClose() {
+    if (RT && RT.key !== routeKey()) buildRoute(RT.start, RT.name, true);
+    if (pendingFit) { pendingFit = false; areaFit(); }
   }
   // Danh sách tỉnh: hợp các tỉnh có WM hoặc có đối thủ (mọi chuỗi, kể cả chuỗi đang tắt).
   let PROVS = [];
@@ -280,9 +302,9 @@
     S.sel = null; fillVung();
     const keep = provsInRegion();
     S.tinh.forEach((k) => { if (!keep.has(k)) S.tinh.delete(k); });   // tỉnh đang chọn không thuộc miền/vùng mới
-    syncTinh(); fillQuan(); renderOverview(); fitScope();
+    syncTinh(); fillQuan(); renderOverview(); areaFit();
   }
-  function provsChanged() { S.sel = null; syncTinh(); fillQuan(); renderOverview(); fitScope(); }
+  function provsChanged() { S.sel = null; syncTinh(); fillQuan(); renderOverview(); areaFit(); }
   // Chọn tỉnh ngoài vùng (bấm ghi chú, bấm thanh %, tìm cửa hàng) → bỏ lọc vùng.
   function toggleProv(k) {
     if (S.tinh.has(k)) S.tinh.delete(k);
@@ -297,7 +319,7 @@
   function buildWmMarkers() {                         // gọi lại mỗi khi danh sách WM+ đổi (upload)
     wmMarkers.forEach((mk) => mk.remove());
     wmMarkers = S.wm.map((w, i) => L.circleMarker([w.lat, w.lng], { radius: 5, weight: w.chuoi === "WMT" ? 2.5 : 1, color: w.chuoi === "WMT" ? getVar("--wmt") : "#fff", fillOpacity: 0.9, bubblingMouseEvents: false })
-      .bindTooltip(() => wmInfo(i)).on("click", () => select(i)));
+      .bindTooltip(() => wmInfo(i)).on("click", () => select(i, true)));
   }
   function renderMap(scope) {
     const inScope = new Set(scope);
@@ -305,7 +327,7 @@
       if (!inScope.has(i)) { mk.remove(); return; }
       mk.addTo(map).setStyle({ fillColor: S.near[i] <= S.R ? getVar("--wm-hit") : getVar("--wm-free"), radius: S.sel === i ? 9 : 5 });
     });
-    if (RT && RT.key !== routeKey()) buildRoute(RT.start, RT.name, true);     // đổi bộ lọc thì tính lại tuyến từ cùng điểm xuất phát
+    if (RT && RT.key !== routeKey() && !listOpen()) buildRoute(RT.start, RT.name, true);     // đổi bộ lọc thì tính lại tuyến từ cùng điểm xuất phát; đang tích nhiều mục thì đợi đóng danh sách
     renderNotes(scope); renderBhxAll(); bhxLayer.clearLayers(); ringLayer.clearLayers();
     const src = S.sel != null ? [S.sel] : scope, seen = new Set();
     src.forEach((i) => S.pairsBy[i].forEach(([j, d]) => {
@@ -323,17 +345,22 @@
 
   // ---------- Lập tuyến ----------
   // Chọn N cửa hàng (WM, đối thủ đang bật, hoặc cả hai) gần điểm xuất phát nhất trong bộ lọc, rồi xếp thứ tự đi ngắn nhất theo đường thẳng (không gửi toạ độ đi đâu).
-  // Đường đi thật chỉ có khi người dùng bấm mở Google Maps; mỗi link Google nhận tối đa 10 điểm nên tuyến dài chia thành nhiều chặng.
+  // Mỗi link Google nhận tối đa 10 điểm nên tuyến dài chia thành nhiều chặng.
   const GMAP_STOPS = 10;
   const RT_HINT = "Nhập điểm xuất phát rồi bấm Lập tuyến, hoặc bấm một điểm trên bản đồ.";
   let RT = null, rtLayer = null, popupClosedAt = 0;
   const filterKey = () => [S.mien, S.vung, S.tinh, S.quan, S.phuong, S.khu].map(setKey).concat(S.chuoi).join("|");
-  const routeKey = () => [filterKey(), [...S.chains].sort().join(), $("#rt-n").value, $("#rt-nc").value, $("#rt-mode").value].join("|");
+  const routeKey = () => [filterKey(), S.R, [...S.chains].sort().join(), $("#rt-n").value, $("#rt-nc").value, $("#rt-mode").value].join("|");
   const rtHint = () => ($("#rt-msg").textContent = RT_HINT);
-  // Mỗi lần bấm chỗ trống trên bản đồ là lập lại tuyến từ điểm đó; bấm để đóng popup thì bỏ qua.
+  // Mỗi lần bấm chỗ trống trên bản đồ là lập lại tuyến từ điểm đó; bấm để đóng popup thì bỏ qua. Bấm đúp là phóng to, không lập tuyến.
   function syncPick() {
     $("#map").classList.add("rt-arm");
-    map.on("click", (e) => { if (Date.now() - popupClosedAt > 300) buildRoute({ lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) }, "", true); });
+    let timer = 0;
+    map.on("click", (e) => {
+      clearTimeout(timer);
+      if (Date.now() - popupClosedAt > 300) timer = setTimeout(() => buildRoute({ lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) }, "", true), 280);
+    });
+    map.on("dblclick", () => clearTimeout(timer));
   }
   function clearRoute() {
     RT = null;
@@ -347,7 +374,10 @@
     const count = (id, max) => { const n = Math.max(0, Math.min(max, Math.floor(+$(id).value) || 0)); $(id).value = n; return n; };
     const nW = count("#rt-n", ROUTE_MAX), nC = count("#rt-nc", ROUTE_MAX - nW);
     const wm = scopeIdx().filter((i) => S.wm[i] !== start).map((i) => ({ s: S.wm[i], i }));
-    const comp = bhxScope().filter((j) => S.bhx[j] !== start).map((j) => ({ s: S.bhx[j], i: -1 }));
+    // Đối thủ lấy đúng các chấm đang hiện trên bản đồ: trong bộ lọc, hoặc trong bán kính của WM đang lọc.
+    const shown = new Set(bhxScope());
+    scopeIdx().forEach((i) => { for (const [j, d] of S.pairsBy[i]) { if (d > S.R) break; shown.add(j); } });
+    const comp = [...shown].filter((j) => S.bhx[j] !== start).map((j) => ({ s: S.bhx[j], i: -1 }));
     return nearestStops(wm, start, nW).concat(nearestStops(comp, start, nC));
   }
   const stopCount = () => {
@@ -397,7 +427,7 @@
     RT = { key: routeKey(), start, name: name || "", stops: r.order.map((k) => near[k]), legs: r.legs, total: r.total, exact: r.exact };
     $("#rt-msg").textContent = near.length ? "" : "Không có cửa hàng nào trong bộ lọc để đi tới.";
     $("#rt-clear").hidden = false;
-    drawRoute();
+    drawRoute(quiet ? "inside" : "all");
     if (!quiet) $("#rt-card").scrollIntoView({ behavior: "smooth", block: "start" });
     if (near.length && $("#rt-mode").value !== "line") roadRoute(RT);
   }
@@ -413,14 +443,16 @@
       RT.total = RT.legs.reduce((a, b) => a + b, 0);
       RT.totalMin = RT.mins.reduce((a, b) => a + b, 0);
       msg.textContent = "";
-      drawRoute();
+      drawRoute("keep");                               // đã có đường thực tế: giữ nguyên khung đang xem
     } catch (err) {
       if (rt === RT) msg.textContent = `Chưa tính được đường thực tế, đang hiện đường thẳng. ${err.message}`;
     }
   }
-  function fitRoute() {
-    const pts = RT.path || [RT.start].concat(RT.stops.map((x) => x.s)).map((p) => [p.lat, p.lng]);
-    map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 15 });
+  // "all": đưa cả tuyến vào khung, dùng khi người dùng yêu cầu. "inside": điểm dừng đã nằm trong khung thì giữ nguyên, thiếu thì chỉ thu nhỏ vừa đủ, không phóng to.
+  function fitRoute(view) {
+    const stops = [RT.start].concat(RT.stops.map((x) => x.s)).map((p) => [p.lat, p.lng]);
+    if (view === "all") map.fitBounds(L.latLngBounds(RT.path || stops), { padding: [40, 40], maxZoom: 15 });
+    else if (view === "inside" && !map.getBounds().contains(L.latLngBounds(stops))) map.fitBounds(L.latLngBounds(stops), { padding: [40, 40], maxZoom: map.getZoom() });
   }
   const numIcon = (t, cls = "") => L.divIcon({ className: "rt-num " + cls, html: t, iconSize: [22, 22] });
   function gmapDirLinks() {
@@ -433,7 +465,7 @@
     }
     return `<div class="gmap-links">${out.join("")}</div>`;
   }
-  function drawRoute() {
+  function drawRoute(view) {
     if (!rtLayer) rtLayer = L.layerGroup().addTo(map);
     rtLayer.clearLayers();
     const pts = [RT.start].concat(RT.stops.map((x) => x.s)).map((p) => [p.lat, p.lng]);
@@ -441,13 +473,17 @@
     L.marker(pts[0], { icon: numIcon("A", "start"), keyboard: false }).bindTooltip(() => esc(RT.name || "Điểm xuất phát")).addTo(rtLayer);
     RT.stops.forEach((st, x) => {
       const mk = L.marker(pts[x + 1], { icon: numIcon(x + 1), keyboard: false }).bindTooltip(() => (st.i >= 0 ? wmInfo(st.i) : storeTip(st.s))).addTo(rtLayer);
-      if (st.i >= 0) mk.on("click", () => select(st.i));
+      if (st.i >= 0) mk.on("click", () => select(st.i, true));
     });
-    fitRoute();
+    fitRoute(view);
     const box = $("#rt-result");
     box.hidden = !RT.stops.length;
     if (!RT.stops.length) return;
-    box.innerHTML = (RT.name ? `<p>Xuất phát: <b>${esc(RT.name)}</b></p>` : "") + (RT.path
+    const gotW = RT.stops.filter((x) => x.i >= 0).length, gotC = RT.stops.length - gotW, wantW = +$("#rt-n").value, wantC = +$("#rt-nc").value;
+    const notes = [gotW < wantW ? `Bạn nhập ${fmt(wantW)} WM, bộ lọc hiện chỉ có ${fmt(gotW)} WM.` : "",
+      gotC < wantC ? `Bạn nhập ${fmt(wantC)} đối thủ, bản đồ hiện chỉ có ${fmt(gotC)}.` : "",
+      !wantC ? "Tuyến không ghé đối thủ vì Số đối thủ đang là 0." : ""].filter(Boolean).join(" ");
+    box.innerHTML = (RT.name ? `<p>Xuất phát: <b>${esc(RT.name)}</b></p>` : "") + (notes ? `<p class="rt-note">${notes}</p>` : "") + (RT.path
         ? `<p><b>${stopCount()} · ${fmt(RT.total, 1)} km đường bộ · khoảng ${fmt(RT.totalMin)} phút.</b> Google tính theo đường ô tô, chưa gồm giờ dừng.`
           + ($("#rt-mode").value === "two-wheeler" ? " Xe máy có thể đi đường khác (hẻm, không đi cao tốc): bấm link để xem đúng đường xe máy." : "") + `</p>`
         : `<p><b>${stopCount()} · khoảng ${fmt(RT.total, 1)} km đường thẳng.</b> `
@@ -550,9 +586,10 @@
       return { j, b: S.bhx[j], n: CNT_B[j], w, d: w ? Math.round(nb.d[j] * 1000) / 1000 : null };
     });
   }
-  function select(i) {
+  // fromMap: bấm ngay trên bản đồ thì điểm đó đang nhìn thấy, không cần di chuyển bản đồ.
+  function select(i, fromMap) {
     S.sel = S.sel === i ? null : i; wmJump = S.sel != null;
-    if (S.sel != null) map.setView([S.wm[i].lat, S.wm[i].lng], Math.max(map.getZoom(), 13));
+    if (S.sel != null && !fromMap) map.setView([S.wm[i].lat, S.wm[i].lng], Math.max(map.getZoom(), 13));
     renderOverview();
   }
   // ---------- Thẻ đặc điểm khu vực (bấm 1 WM) ----------
@@ -645,7 +682,7 @@
       e.preventDefault();
       const d = e.target.closest("[data-k]"); if (d) { pick(+d.dataset.k); done(); }
     });
-    input.addEventListener("blur", () => { list.hidden = true; delete input.dataset.open; opts.onBlur && opts.onBlur(); });
+    input.addEventListener("blur", () => { list.hidden = true; delete input.dataset.open; opts.onBlur && opts.onBlur(); if (opts.multi) afterListClose(); });
   }
   const checkMark = (on, html) => `<span class="chk${on ? " on" : ""}">${on ? "✓" : ""}</span>${html}`;
   combo($("#tinh-q"), $("#tinh-list"), (q) => {
@@ -752,6 +789,7 @@
     document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== "view-" + view));
     document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
     if (view === "overview") setTimeout(() => map.invalidateSize(), 0);
+    if (view === "price") WMPrice.open(API, S.user.role === "admin");
     if (view === "wm") { WMUpload.ensureLib().catch(() => {}); openOnce("wm", () => [renderVersions()]); }
     if (view === "admin") openOnce("admin", () => [renderUsers(), renderLog()]);
   }
@@ -864,7 +902,7 @@
   function applySettings(st) {
     const viewerExport = st.viewer_can_export !== false;
     const can = S.user.role === "admin" || viewerExport;
-    document.querySelectorAll("#exp-wm, #exp-bhx, #exp-changes").forEach((b) => (b.hidden = !can));
+    document.querySelectorAll("#exp-wm, #exp-bhx, #exp-changes, #p-export").forEach((b) => (b.hidden = !can));
     $("#s-export").checked = viewerExport;
   }
 
@@ -920,7 +958,7 @@
       S.chains = new Set(has.every((c) => S.chains.has(c)) ? ["BHX"] : has);
     } else if (S.chains.has(b.dataset.c)) { if (S.chains.size > 1) S.chains.delete(b.dataset.c); }   // luôn giữ ít nhất 1 chuỗi
     else S.chains.add(b.dataset.c);
-    applyChains(); fitScope(true);
+    applyChains();
   });
   $("#rt-clear").addEventListener("click", clearRoute);
   ["#rt-n", "#rt-nc", "#rt-mode"].forEach((s) => $(s).addEventListener("change", () => { if (RT) buildRoute(RT.start, RT.name, true); }));
@@ -937,7 +975,7 @@
     navigator.geolocation.getCurrentPosition((p) => buildRoute({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }, "Vị trí của tôi"),
       () => (msg.textContent = "Không lấy được vị trí. Hãy cho phép trình duyệt dùng vị trí, hoặc nhập địa chỉ."), { timeout: 10000 });
   });
-  $("#chuoi").addEventListener("change", (e) => { S.chuoi = e.target.value; S.sel = null; renderOverview(); fitScope(); });
+  $("#chuoi").addEventListener("change", (e) => { S.chuoi = e.target.value; S.sel = null; renderOverview(); });
   $("#q").addEventListener("input", (e) => { S.q = plain(e.target.value.trim()); renderWmTable(scopeIdx()); $("#bhx-count").textContent = `(${fmt(bhxRows().length)})`; });
   $("#top-n").addEventListener("change", (e) => {
     S.topN = Math.max(1, Math.floor(+e.target.value) || 5);
@@ -955,6 +993,7 @@
     $("#map-full").textContent = on ? "✕ Thoát toàn màn hình" : "⛶ Toàn màn hình";
     setTimeout(() => map.invalidateSize(), 50);
   }
+  $("#map-fit").addEventListener("click", () => { if (RT && RT.stops.length) fitRoute("all"); else fitScope(); });
   $("#map-full").addEventListener("click", () => setMapMax(!$("#map-card").classList.contains("map-max")));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#map-card").classList.contains("map-max")) setMapMax(false); });
   $("#bars").addEventListener("click", (e) => {

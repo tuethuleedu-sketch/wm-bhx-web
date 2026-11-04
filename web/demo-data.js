@@ -83,6 +83,37 @@
     { email: "dongnghiep1.demo@example.com", role: "viewer", added: "2026-10-30" },
   ];
 
+  let priceStore = null, priceJob = null, priceCfg = [{ tinh: "Hồ Chí Minh", provinceId: "1", wardId: "1", storeId: "1" }, { tinh: "Hà Nội", provinceId: "2", wardId: "2", storeId: "2" }, { tinh: "Cần Thơ", provinceId: "3", wardId: "3", storeId: "3" }];
+  function priceDemo() {
+    if (priceStore) return priceStore;
+    let seed = 20261104;
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+    const CATS = ["Sữa các loại", "Mì, phở, cháo gói", "Dầu ăn, gia vị", "Nước giải khát", "Bánh kẹo", "Rau củ, trái cây", "Thịt, cá, trứng", "Giặt xả, tẩy rửa", "Chăm sóc cá nhân", "Đồ đông lạnh"];
+    const PROV = [{ tinh: "Hồ Chí Minh", store: "demo-11", rate: 0.36, level: {} }, { tinh: "Hà Nội", store: "demo-22", rate: 0.3, level: {} }, { tinh: "Cần Thơ", store: "demo-33", rate: 0.26, level: {} }];
+    PROV.forEach((p) => CATS.forEach((c) => (p.level[c] = 0.97 + rnd() * 0.06)));
+    const dates = Array.from({ length: 8 }, (_, w) => new Date(Date.now() - (7 - w) * 7 * 864e5).toISOString().slice(0, 10));
+    const round = (x) => Math.round(x / 100) * 100, skus = [], items = [], hist = [], runs = [];
+    PROV.forEach((p) => dates.forEach((date) => runs.push({ date, tinh: p.tinh, store: p.store, file: "gia_demo.xlsx", by: "demo@example.com", n: 0, added: 0, gone: 0, up: 0, down: 0 })));
+    for (let k = 0; k < 900; k++) {
+      const cat = CATS[Math.floor(rnd() * CATS.length)], id = String(900000 + k), list = (8 + rnd() * rnd() * 240) * 1000;
+      skus.push({ id, code: String(100000 + k), name: `SKU demo ${String(k + 1).padStart(4, "0")}`, cat, brand: `Thương hiệu ${"ABCDEFGHIJKLMN"[k % 14]}`, unit: "Gói", url: "" });
+      PROV.forEach((p, pi) => {
+        if (rnd() < 0.03) return;                                                  // một số SKU không bán ở tỉnh này
+        const from = k < 860 ? 0 : 1 + Math.floor(rnd() * 7), to = k % 45 === 7 ? 3 + Math.floor(rnd() * 4) : 7;
+        let base = round(list * p.level[cat]), keep = "", row = null;
+        for (let w = from; w <= to; w++) {
+          if (rnd() < 0.05) base = round(base * (1 + 0.03 + rnd() * 0.05));
+          const on = rnd() < p.rate, off = on ? 0.05 + rnd() * rnd() * 0.5 : 0, final = round(base * (1 - off)), sig = final + "|" + base;
+          if (sig !== keep) { hist.push([dates[w], p.tinh, id, final, base]); keep = sig; }
+          row = { tinh: p.tinh, store: p.store, id, final, base, off: base > final ? 1 - final / base : 0, promo: on, title: on && rnd() < 0.2 ? "Mua 2 giảm thêm" : "", can: rnd() > 0.04, first_seen: dates[from], last_seen: dates[to] };
+          runs[pi * dates.length + w].n++;
+        }
+        if (row) items.push(row);
+      });
+    }
+    hist.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return (priceStore = { skus, items, hist, runs });
+  }
   window.DemoAPI = {
     mode: "demo",
     async currentUser() { return null; },
@@ -107,6 +138,56 @@
         { at: at(6), email: "admin.demo@example.com", event: "logout" },
       ];
     },
+    // Giá đối thủ giả cho bản xem trước: 8 tuần, tên ngành, thương hiệu, SKU và giá đều do máy sinh ra.
+    async getPrices() { return priceDemo(); },
+    async publishPrices(rows, meta, force) {
+      const d = priceDemo(), date = meta.date, byT = new Map(), provinces = [];
+      rows.forEach((r) => { if (!byT.has(r.tinh)) byT.set(r.tinh, []); byT.get(r.tinh).push(r); });
+      byT.forEach((list, t) => {
+        const last = d.items.filter((x) => x.tinh === t).reduce((m, x) => (x.last_seen > m ? x.last_seen : m), ""), active = d.items.filter((x) => x.tinh === t && x.last_seen === last).length;
+        if (!force && list.length < active * 0.7) throw Object.assign(new Error(`${t}: file chỉ có ${list.length} SKU, ít hơn nhiều so với ${active} SKU lần trước.`), { code: "PRICE_SHRINK" });
+      });
+      byT.forEach((list, t) => {
+        const old = d.items.filter((x) => x.tinh === t), prev = new Map(old.map((x) => [x.id, x])), seen = new Set(list.map((r) => r.id)), last = old.reduce((m, x) => (x.last_seen > m ? x.last_seen : m), "");
+        const s = { tinh: t, rows: list.length, added: 0, gone: old.filter((x) => x.last_seen === last && !seen.has(x.id)).length, up: 0, down: 0 };
+        d.items = d.items.filter((x) => !(x.tinh === t && seen.has(x.id)));
+        list.forEach((r) => {
+          const o = prev.get(r.id);
+          if (!o) s.added++; else if (o.final && r.final > o.final) s.up++; else if (o.final && r.final < o.final) s.down++;
+          if (!o || o.final !== r.final || o.base !== r.base) d.hist.push([date, t, r.id, r.final, r.base]);
+          d.items.push({ tinh: t, store: r.store, id: r.id, final: r.final, base: r.base, off: r.off, promo: r.promo, title: r.title, can: r.can, first_seen: o ? o.first_seen : date, last_seen: date });
+          if (!d.skus.some((x) => x.id === r.id)) d.skus.push({ id: r.id, code: r.code, name: r.name, cat: r.cat, brand: r.brand, unit: r.unit, url: r.url });
+        });
+        d.runs.push({ date, tinh: t, store: list[0].store, file: meta.file, by: "demo@example.com", n: list.length, added: s.added, gone: s.gone, up: s.up, down: s.down });
+        provinces.push(s);
+      });
+      return { date, rows: rows.length, provinces };
+    },
+    // Nút Cập nhật giá ở bản xem trước: chạy giả, không gọi BHX và không cần token.
+    async priceConfig() { return { provinces: priceCfg, missing: [], job: priceJob }; },
+    async savePriceConfig(list) { priceCfg = list; return { provinces: priceCfg, missing: [], job: priceJob }; },
+    async priceTest() { await new Promise((r) => setTimeout(r, 300)); return priceCfg.map((p) => ({ tinh: p.tinh, ok: true, sku: 10, withPrice: 10, withCat: 10, withBrand: 10 })); },
+    async priceStart() {
+      if (!priceJob || priceJob.status === "done") priceJob = { id: "demo", status: "running", date: new Date().toISOString().slice(0, 10), msg: "", tinh: priceCfg[0].tinh, done: 0, total: 459, rows: 0, summary: null };
+      if (priceJob.status === "paused") priceJob.status = "running";
+      return { ...priceJob };
+    },
+    async priceStep() {
+      await new Promise((r) => setTimeout(r, 250));
+      const j = priceJob;
+      if (j.status === "running") {
+        j.done = Math.min(j.total, j.done + 153); j.rows += 850; j.tinh = priceCfg[Math.min(priceCfg.length - 1, Math.floor(j.done / 153))].tinh;
+        if (j.done >= j.total) j.status = "saving";
+      } else if (j.status === "saving") {
+        const d = priceDemo(), rows = [];
+        d.items.forEach((x) => { const s = d.skus.find((k) => k.id === x.id); if (x.last_seen === new Date().toISOString().slice(0, 10) || x.last_seen >= d.runs[d.runs.length - 1].date) rows.push({ ...s, tinh: x.tinh, store: x.store, final: x.final, base: x.base, off: x.off, promo: x.promo, title: x.title, can: x.can }); });
+        j.summary = await this.publishPrices(rows, { file: "Cập nhật trực tiếp", date: j.date }, true);
+        j.status = "done";
+      }
+      return { ...j };
+    },
+    async priceFinish() { return { ...priceJob }; },
+    async priceCancel() { priceJob = null; return { provinces: priceCfg, missing: [], job: null }; },
     // Bản xem trước không gọi Google: đường giả gấp khúc qua các điểm, chỉ để xem giao diện.
     async getRoute(points) {
       await new Promise((r) => setTimeout(r, 300));
