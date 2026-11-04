@@ -113,6 +113,20 @@
     },
   };
 
+  // Maps giả: M.directions(req) → kết quả Directions; M.mapsLog ghi mọi yêu cầu.
+  G.Maps = {
+    DirectionFinder: { Mode: { DRIVING: "driving" } },
+    newDirectionFinder() {
+      const req = { waypoints: [] }, f = {
+        setOrigin(lat, lng) { req.origin = [lat, lng]; return f; }, setDestination(lat, lng) { req.destination = [lat, lng]; return f; },
+        setMode(m) { req.mode = m; return f; }, setOptimizeWaypoints(v) { req.optimize = v; return f; }, setRegion() { return f; }, setLanguage() { return f; },
+        addWaypoint(lat, lng) { req.waypoints.push([lat, lng]); return f; },
+        getDirections() { M.mapsLog.push(req); return M.directions(req); },
+      };
+      return f;
+    },
+  };
+
   // UrlFetchApp giả: M.fetchHandler(url) → { code, body } (body là object sẽ được JSON hoá). M.fetchLog ghi mọi URL.
   M.fetchLog = [];
   const resp = (x) => ({ getResponseCode: () => x.code, getContentText: () => (typeof x.body === "string" ? x.body : JSON.stringify(x.body)) });

@@ -167,9 +167,24 @@
   check("Drive API chưa bật → chuyển vào thùng rác + ghi chú cảnh báo", M.trashed.includes(v1file) && /thùng rác/.test(vs.data[1][11]));
   purgeExpiredWm();
   check("chạy job lần nữa: không xoá lại bản đã xoá", M.removed.length === 1);
-  r = call("publishWm", { token: admin.token, rows: W2.concat([{ ma: "T1", tinh: "T", lat: 20.7, lng: 106.1, chuoi: "WMT", khu_vuc: "Rural", dia_chi: "12 Lê Lợi", vung: "Vùng 2", mien: "Miền Bắc", quan: "Quận Ba" }]) });
+  r = call("publishWm", { token: admin.token, rows: W2.concat([{ ma: "T1", tinh: "T", lat: 20.7, lng: 106.1, chuoi: "WMT", khu_vuc: "Rural", dia_chi: "12 Lê Lợi", vung: "Vùng 2", mien: "Miền Bắc", quan: "Quận Ba", phuong: "Phường Bốn" }]) });
   const t1 = call("snapshot", { token: admin.token }).data.wm.find((w) => w.ma === "T1");
-  check("lưu & đọc lại Chuỗi/Khu vực/Địa chỉ/Vùng/Miền/Quận", r.ok && t1 && t1.chuoi === "WMT" && t1.khu_vuc === "Rural" && t1.dia_chi === "12 Lê Lợi" && t1.vung === "Vùng 2" && t1.mien === "Miền Bắc" && t1.quan === "Quận Ba", t1);
+  check("lưu & đọc lại Chuỗi/Khu vực/Địa chỉ/Vùng/Miền/Quận/Phường", r.ok && t1 && t1.chuoi === "WMT" && t1.khu_vuc === "Rural" && t1.dia_chi === "12 Lê Lợi" && t1.vung === "Vùng 2" && t1.mien === "Miền Bắc" && t1.quan === "Quận Ba" && t1.phuong === "Phường Bốn", t1);
+  // Đường đi thực tế: Google giả đảo ngược các điểm giữa đường
+  M.mapsLog = [];
+  M.directions = (q) => ({ status: "OK", routes: [{ waypoint_order: q.waypoints.map((_, k) => q.waypoints.length - 1 - k),
+    legs: Array.from({ length: q.waypoints.length + 1 }, () => ({ distance: { value: 2500 }, duration: { value: 300 } })), overview_polyline: { points: "abc" } }] });
+  const rp = (n) => Array.from({ length: n }, (_, k) => ({ lat: 21 + k * 0.01, lng: 105.8 }));
+  check("route: chưa đăng nhập thì bị từ chối, không gọi Google", call("route", { points: rp(3) }).code === "AUTH" && M.mapsLog.length === 0);
+  r = call("route", { token: viewer.token, points: rp(5) });
+  check("route: viewer dùng được; 1 chặng, điểm cuối giữ nguyên, đúng thứ tự Google trả", r.ok && r.data.order.join() === "2,1,0,3" && r.data.legs.length === 4 && r.data.legs[0].km === 2.5 && r.data.legs[0].min === 5 && M.mapsLog.length === 1 && M.mapsLog[0].optimize === true, r);
+  M.mapsLog = [];
+  r = call("route", { token: viewer.token, points: rp(31) });
+  check("route: 30 điểm chia 2 chặng, chặng sau đi tiếp từ điểm cuối chặng trước, đủ mọi điểm", r.ok && M.mapsLog.length === 2 && M.mapsLog[1].origin[0] === 21 + 24 * 0.01 && new Set(r.data.order).size === 30 && r.data.legs.length === 30 && r.data.polys.length === 2, r);
+  check("route: từ chối quá nhiều điểm hoặc toạ độ ngoài VN, không gọi Google", !call("route", { token: viewer.token, points: rp(52) }).ok && !call("route", { token: viewer.token, points: [{ lat: 1, lng: 1 }, { lat: 21, lng: 105 }] }).ok && M.mapsLog.length === 2);
+  M.directions = () => ({ status: "ZERO_RESULTS", routes: [] });
+  r = call("route", { token: viewer.token, points: rp(3) });
+  check("route: Google không tìm được đường thì báo lỗi rõ", !r.ok && /ZERO_RESULTS/.test(r.error), r);
   check("boot: chưa đăng nhập thì bị từ chối", call("boot").code === "AUTH");
   r = call("boot", { token: admin.token });
   check("boot: 1 lần gọi trả đủ người dùng, cài đặt, dữ liệu, thay đổi", r.ok && r.data.me.role === "admin" && r.data.settings.viewer_can_export !== undefined && r.data.snapshot.wm.some((w) => w.ma === "T1") && Array.isArray(r.data.changes), r);
