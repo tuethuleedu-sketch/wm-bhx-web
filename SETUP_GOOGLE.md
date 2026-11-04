@@ -116,6 +116,7 @@ SYNC_SECRET=chuỗi-64-ký-tự
 - **Giá đối thủ:** chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Dữ liệu nằm ở các tab `price_*` của Sheet chính, giữ lâu dài, không có giá WM.
   Thiết lập: Apps Script → Project Settings → Script properties → tự thêm `BHX_AUTHORIZATION`, `BHX_ACCESSTOKEN`, `BHX_CUSTOMER_ID`, `BHX_DEVICEID`, `BHX_DEVICETOKEN`, `BHX_USERNAME`, `BHX_XAPIKEY`. Sau đó điền mã tỉnh, phường, cửa hàng trong tab Giá đối thủ, bấm **Thử kết nối** rồi **Cập nhật giá**. Các tab `price_*` tự tạo ở lần lưu đầu tiên, không cần chạy lại `setup`.
   Token không nhập vào web, không dán vào code, không gửi cho ai. Ai có quyền sửa Apps Script đều đọc được token, nên giới hạn người có quyền này. Token hết hạn: thay trong Script properties rồi bấm **Tiếp tục cập nhật**.
+- **Bot Hỏi Claude:** chỉ Admin dùng, tính phí theo lượng dùng ở tài khoản API của Anthropic. Tự thêm `CLAUDE_API_KEY` vào Script properties và đặt trần chi tiêu trong Claude Console. Bot chỉ gửi số tổng hợp giá đối thủ, không gửi tên SKU và dữ liệu WM. Đổi model ở `BOT_MODEL`, giới hạn lượt ở `BOT_DAILY` trong `Code.gs`; dán lại `Code.gs` thì các giá trị này về như trong file.
 
 ## Test có sẵn (cho người bảo trì)
 - `gas/test/run_tests.html`: test backend `Code.gs` trên môi trường Google giả lập (mật khẩu, quyền, upload, hết hạn 48h, đồng bộ BHX, thu hồi, nhật ký).
