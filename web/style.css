@@ -124,7 +124,7 @@ i.lab { font-style: normal; }
 .route-card { margin-bottom: 12px; }
 .leaflet-container.rt-arm { cursor: crosshair; }
 .route-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
-.route-bar #rt-n { width: 70px; }
+.route-bar #rt-n, .route-bar #rt-nc { width: 70px; }
 .route-bar #rt-addr-box { flex: 1 1 280px; }
 .route-bar #rt-addr { width: 100%; }
 .route-result { padding-top: 10px; }

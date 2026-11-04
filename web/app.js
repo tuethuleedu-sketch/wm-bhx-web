@@ -302,7 +302,7 @@
   const RT_HINT = "Nhập điểm xuất phát rồi bấm Lập tuyến, hoặc bấm một điểm trên bản đồ.";
   let RT = null, rtLayer = null, popupClosedAt = 0;
   const filterKey = () => [S.mien, S.vung, S.tinh, S.quan, S.phuong, S.chuoi, S.khu].join("|");
-  const routeKey = () => [filterKey(), [...S.chains].sort().join(), $("#rt-to").value, $("#rt-n").value, $("#rt-mode").value].join("|");
+  const routeKey = () => [filterKey(), [...S.chains].sort().join(), $("#rt-n").value, $("#rt-nc").value, $("#rt-mode").value].join("|");
   const rtHint = () => ($("#rt-msg").textContent = RT_HINT);
   // Mỗi lần bấm chỗ trống trên bản đồ là lập lại tuyến từ điểm đó; bấm để đóng popup thì bỏ qua.
   function syncPick() {
@@ -314,12 +314,20 @@
     if (rtLayer) rtLayer.clearLayers();
     $("#rt-result").hidden = true; $("#rt-clear").hidden = true; rtHint();
   }
+  // N điểm gần xuất phát nhất trong list. Số WM và số đối thủ chọn riêng, tổng không quá ROUTE_MAX (giới hạn của backend).
+  const ROUTE_MAX = 50;
+  const nearestStops = (list, start, n) => (n ? Nearby.search(Nearby.index(list.map((t) => t.s)), start.lat, start.lng, n, 0).slice(0, n).map(([k]) => list[k]) : []);
   function routeTargets(start) {
-    const to = $("#rt-to").value, out = [];
-    if (to !== "comp") scopeIdx().forEach((i) => { if (S.wm[i] !== start) out.push({ s: S.wm[i], i }); });
-    if (to !== "wm") bhxScope().forEach((j) => { if (S.bhx[j] !== start) out.push({ s: S.bhx[j], i: -1 }); });
-    return out;
+    const count = (id, max) => { const n = Math.max(0, Math.min(max, Math.floor(+$(id).value) || 0)); $(id).value = n; return n; };
+    const nW = count("#rt-n", ROUTE_MAX), nC = count("#rt-nc", ROUTE_MAX - nW);
+    const wm = scopeIdx().filter((i) => S.wm[i] !== start).map((i) => ({ s: S.wm[i], i }));
+    const comp = bhxScope().filter((j) => S.bhx[j] !== start).map((j) => ({ s: S.bhx[j], i: -1 }));
+    return nearestStops(wm, start, nW).concat(nearestStops(comp, start, nC));
   }
+  const stopCount = () => {
+    const w = RT.stops.filter((x) => x.i >= 0).length, c = RT.stops.length - w;
+    return [w ? `${fmt(w)} WM` : "", c ? `${fmt(c)} đối thủ` : ""].filter(Boolean).join(" + ");
+  };
   // Toạ độ gõ tay hoặc nằm trong link Google Maps (@vĩ,kinh hoặc !3d vĩ !4d kinh); ngoài Việt Nam thì bỏ qua.
   function parseLatLng(s) {
     const m = /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/.exec(s) || /(-?\d{1,2}\.\d+)(?:\s*,\s*|%2C|\s+)(-?\d{2,3}\.\d+)/i.exec(s);
@@ -359,10 +367,7 @@
   }
   // quiet: lập từ thao tác trên bản đồ hoặc đổi bộ lọc, không cuộn trang.
   function buildRoute(start, name, quiet) {
-    const N = Math.max(1, Math.min(50, Math.floor(+$("#rt-n").value) || 10)), targets = routeTargets(start);
-    $("#rt-n").value = N;
-    const near = Nearby.search(Nearby.index(targets.map((t) => t.s)), start.lat, start.lng, N, 0).slice(0, N).map(([k]) => targets[k]);
-    const r = Nearby.route(start, near.map((t) => t.s));
+    const near = routeTargets(start), r = Nearby.route(start, near.map((t) => t.s));
     RT = { key: routeKey(), start, name: name || "", stops: r.order.map((k) => near[k]), legs: r.legs, total: r.total, exact: r.exact };
     $("#rt-msg").textContent = near.length ? "" : "Không có cửa hàng nào trong bộ lọc để đi tới.";
     $("#rt-clear").hidden = false;
@@ -417,9 +422,9 @@
     box.hidden = !RT.stops.length;
     if (!RT.stops.length) return;
     box.innerHTML = (RT.name ? `<p>Xuất phát: <b>${esc(RT.name)}</b></p>` : "") + (RT.path
-        ? `<p><b>${fmt(RT.stops.length)} cửa hàng · ${fmt(RT.total, 1)} km đường bộ · khoảng ${fmt(RT.totalMin)} phút.</b> Google tính theo đường ô tô, chưa gồm giờ dừng.`
+        ? `<p><b>${stopCount()} · ${fmt(RT.total, 1)} km đường bộ · khoảng ${fmt(RT.totalMin)} phút.</b> Google tính theo đường ô tô, chưa gồm giờ dừng.`
           + ($("#rt-mode").value === "two-wheeler" ? " Xe máy có thể đi đường khác (hẻm, không đi cao tốc): bấm link để xem đúng đường xe máy." : "") + `</p>`
-        : `<p><b>${fmt(RT.stops.length)} cửa hàng · khoảng ${fmt(RT.total, 1)} km đường thẳng.</b> `
+        : `<p><b>${stopCount()} · khoảng ${fmt(RT.total, 1)} km đường thẳng.</b> `
           + (RT.exact ? "Thứ tự ngắn nhất theo đường thẳng." : "Thứ tự gần ngắn nhất theo đường thẳng.") + ` Đường đi thật dài hơn.</p>`) + gmapDirLinks()
       + `<details><summary>Danh sách ${fmt(RT.stops.length)} điểm dừng theo thứ tự</summary><div class="table-wrap"><table><thead><tr><th>#</th><th>Chuỗi</th><th>Mã CH</th><th>Tên CH</th><th>Phường/Xã</th><th>Quận</th><th>Tỉnh</th><th>Địa chỉ</th><th class="num">Từ điểm trước (km)</th></tr></thead><tbody>`
       + RT.stops.map((st, x) => { const w = st.s; return `<tr><td>${x + 1}</td><td>${esc(st.i >= 0 ? w.chuoi : chainName(w.chain))}</td><td>${esc(w.ma)}</td><td>${esc(w.ten)}</td><td>${esc(w.phuong === "-" ? "" : w.phuong)}</td><td>${esc(w.quan === "-" ? "" : w.quan)}</td><td>${esc(w.tinh)}</td><td class="addr">${esc(w.dia_chi)}</td><td class="num">${fmt(RT.legs[x], 2)}${RT.mins ? ` · ${fmt(RT.mins[x])} phút` : ""}</td></tr>`; }).join("")
@@ -440,20 +445,24 @@
     nears.sort((a, b) => a - b);
     const med = nears.length ? (nears.length % 2 ? nears[(nears.length - 1) / 2] : (nears[nears.length / 2 - 1] + nears[nears.length / 2]) / 2) : NaN;
     $("#k-nwm").textContent = fmt(scope.length);
-    $("#k-nwm-sub").textContent = `WM+ ${fmt(byChain["WM+"])} · WMT ${fmt(byChain.WMT)}`;
+    $("#k-nwm-sub").textContent = `Đếm WM theo bộ lọc: WM+ ${fmt(byChain["WM+"])} + WMT ${fmt(byChain.WMT)}`;
     $("#k-nbhx").textContent = fmt(bScope.length);
     const byComp = {}; bScope.forEach((j) => { const c = S.bhx[j].chain; byComp[c] = (byComp[c] || 0) + 1; });
-    $("#k-nbhx-sub").textContent = (S.chains.size > 1 ? Object.entries(byComp).map(([c, k]) => `${chainName(c)} ${fmt(k)}`).join(" · ") + " · " : "")
+    const Rt = `${fmt(R, R % 1 ? 1 : 0)} km`, L = lab();
+    $("#k-nbhx-sub").textContent = `Đếm ${L} có địa chỉ trong khu vực; ` + (S.chains.size > 1 ? Object.entries(byComp).map(([c, k]) => `${chainName(c)} ${fmt(k)}`).join(" · ") + " · " : "")
       + (S.phuong ? `trong ${optLabel("phuong")}` : S.quan ? `trong ${optLabel("quan")}` : S.tinh ? `trong ${provName(S.tinh)}` : regionName() ? `trong ${regionName()}` : "cả nước, đang mở");
     // Pressure = số đối thủ ÷ số WM, theo tỉnh và chuỗi; bỏ qua Khu vực vì đối thủ không có Urban/Rural. Không phụ thuộc R.
     const nPress = S.wm.filter((w) => inProv(w) && pressOk(w)).length;
     $("#k-press").textContent = nPress ? pct(bScope.length / nPress) : "–";
     $("#k-press-sub").textContent = `${fmt(bScope.length)} ${lab()} ÷ ${fmt(nPress)} WM` + (S.khu ? " · không lọc theo Khu vực" : "");
     $("#k-cov").textContent = scope.length ? pct(cov / scope.length) : "–";
-    $("#k-cov-sub").textContent = `${fmt(cov)} / ${fmt(scope.length)} WM`;
+    $("#k-cov-sub").textContent = `${fmt(cov)} WM có ${L} trong ${Rt} ÷ ${fmt(scope.length)} WM`;
     $("#k-uniq").textContent = fmt(uniq.size);
+    $("#k-uniq-sub").textContent = `${L} cách WM tối đa ${Rt}, gồm cả ngoài khu vực lọc; mỗi cửa hàng đếm 1 lần`;
     $("#k-avg").textContent = scope.length ? fmt(tot / scope.length, 2) : "–";
+    $("#k-avg-sub").textContent = `${fmt(tot)} lượt trong ${Rt} ÷ ${fmt(scope.length)} WM; 1 ${L} gần nhiều WM được đếm nhiều lần`;
     $("#k-med").textContent = isNaN(med) ? "–" : fmt(med, 2) + " km";
+    $("#k-med-sub").textContent = `Trung vị khoảng cách từ mỗi WM tới ${L} gần nhất, đường thẳng; không phụ thuộc bán kính`;
 
     // Thanh % theo tỉnh (theo Miền/Vùng/Chuỗi/Khu vực, hiện đủ tỉnh trong vùng để so sánh)
     const by = {};
@@ -875,7 +884,7 @@
     applyChains(); fitScope(true);
   });
   $("#rt-clear").addEventListener("click", clearRoute);
-  ["#rt-to", "#rt-n", "#rt-mode"].forEach((s) => $(s).addEventListener("change", () => { if (RT) buildRoute(RT.start, RT.name, true); }));
+  ["#rt-n", "#rt-nc", "#rt-mode"].forEach((s) => $(s).addEventListener("change", () => { if (RT) buildRoute(RT.start, RT.name, true); }));
   $("#rt-go").addEventListener("click", () => {
     const msg = $("#rt-msg"), raw = $("#rt-addr").value.trim(), ll = parseLatLng(raw);
     if (ll) buildRoute(ll, `Toạ độ ${ll.lat}, ${ll.lng}`);

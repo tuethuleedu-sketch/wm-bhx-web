@@ -9,7 +9,7 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611041125">
+  <link rel="stylesheet" href="style.css?v=202611041146">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -89,16 +89,6 @@
           <span class="muted small" id="snap-info"></span>
         </div>
 
-        <div class="kpis six">
-          <div class="card kpi hl-wm"><span>Số cửa hàng WM trong bộ lọc</span><b id="k-nwm">–</b><small id="k-nwm-sub"></small></div>
-          <div class="card kpi hl-bhx"><span>Số <i class="lab">BHX</i> trong bộ lọc</span><b id="k-nbhx">–</b><small id="k-nbhx-sub"></small></div>
-          <div class="card kpi"><span>Pressure</span><b id="k-press">–</b><small id="k-press-sub"></small></div>
-          <div class="card kpi"><span>% WM có <i class="lab">BHX</i> trong R</span><b id="k-cov">–</b><small id="k-cov-sub"></small></div>
-          <div class="card kpi"><span>Số <i class="lab">BHX</i> (unique) trong R</span><b id="k-uniq">–</b><small>mỗi cửa hàng đếm 1 lần</small></div>
-          <div class="card kpi"><span><i class="lab">BHX</i> / WM bình quân</span><b id="k-avg">–</b><small>tính trùng nếu 1 cửa hàng gần nhiều WM</small></div>
-          <div class="card kpi"><span>Median <i class="lab">BHX</i> gần nhất</span><b id="k-med">–</b><small>không phụ thuộc R</small></div>
-        </div>
-
         <div class="card route-card" id="rt-card">
           <div class="route-bar small">
             <b>Lập tuyến theo bộ lọc</b>
@@ -106,13 +96,23 @@
               <div class="combo-list" id="rt-addr-list" hidden></div></label>
             <button class="ghost" id="rt-gps">Vị trí của tôi</button>
             <label>Phương tiện <select id="rt-mode"><option value="two-wheeler">Xe máy</option><option value="driving">Ô tô</option><option value="line">Đường thẳng (không gửi Google)</option></select></label>
-            <label>Đi tới <select id="rt-to"><option value="wm">WM</option><option value="comp">Đối thủ đang bật</option><option value="all">WM và đối thủ</option></select></label>
-            <label>Số cửa hàng <input id="rt-n" type="number" min="1" max="50" step="1" value="10"></label>
+            <label>Số WM <input id="rt-n" type="number" min="0" max="50" step="1" value="10"></label>
+            <label title="Lấy từ các chuỗi đối thủ đang bật ở trên">Số đối thủ <input id="rt-nc" type="number" min="0" max="50" step="1" value="0"></label>
             <button id="rt-go">Lập tuyến</button>
             <button class="ghost" id="rt-clear" hidden>Xoá tuyến</button>
             <span class="muted" id="rt-msg"></span>
           </div>
           <div id="rt-result" class="route-result small" hidden></div>
+        </div>
+
+        <div class="kpis six">
+          <div class="card kpi hl-wm"><span>Số WM trong khu vực lọc</span><b id="k-nwm">–</b><small id="k-nwm-sub"></small></div>
+          <div class="card kpi hl-bhx"><span>Số <i class="lab">BHX</i> trong khu vực lọc</span><b id="k-nbhx">–</b><small id="k-nbhx-sub"></small></div>
+          <div class="card kpi"><span>Pressure (<i class="lab">BHX</i> / WM trong khu vực)</span><b id="k-press">–</b><small id="k-press-sub"></small></div>
+          <div class="card kpi"><span>% WM có <i class="lab">BHX</i> trong bán kính</span><b id="k-cov">–</b><small id="k-cov-sub"></small></div>
+          <div class="card kpi"><span>Tổng <i class="lab">BHX</i> quanh các WM (không trùng)</span><b id="k-uniq">–</b><small id="k-uniq-sub"></small></div>
+          <div class="card kpi"><span>Trung bình <i class="lab">BHX</i> quanh mỗi WM</span><b id="k-avg">–</b><small id="k-avg-sub"></small></div>
+          <div class="card kpi"><span>Khoảng cách tới <i class="lab">BHX</i> gần nhất (trung vị)</span><b id="k-med">–</b><small id="k-med-sub"></small></div>
         </div>
 
         <div class="card map-card" id="map-card">
@@ -219,12 +219,12 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611041125"></script>
-  <script src="demo-data.js?v=202611041125"></script>
-  <script src="gas-api.js?v=202611041125"></script>
-  <script src="upload.js?v=202611041125"></script>
-  <script src="area.js?v=202611041125"></script>
-  <script src="nearby.js?v=202611041125"></script>
-  <script src="app.js?v=202611041125"></script>
+  <script src="config.js?v=202611041146"></script>
+  <script src="demo-data.js?v=202611041146"></script>
+  <script src="gas-api.js?v=202611041146"></script>
+  <script src="upload.js?v=202611041146"></script>
+  <script src="area.js?v=202611041146"></script>
+  <script src="nearby.js?v=202611041146"></script>
+  <script src="app.js?v=202611041146"></script>
 </body>
 </html>
