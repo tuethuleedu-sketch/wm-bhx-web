@@ -986,7 +986,8 @@ function prices_() {
 const PRICE_URL = 'https://api.bachhoaxanh.com/gw/Category/AjaxProduct';
 const PRICE_PAGE = 10, PRICE_RETRY = 3, PRICE_DELAY_MS = 300, PRICE_JOB = 'price_job', PRICE_CFG = 'price_cfg';
 const PRICE_SECRETS = { authorization: 'BHX_AUTHORIZATION', accesstoken: 'BHX_ACCESSTOKEN', 'customer-id': 'BHX_CUSTOMER_ID', deviceid: 'BHX_DEVICEID', devicetoken: 'BHX_DEVICETOKEN', username: 'BHX_USERNAME', xapikey: 'BHX_XAPIKEY' };
-const PRICE_DEFAULT = [{ tinh: 'Hồ Chí Minh', provinceId: '', wardId: '', storeId: '' }, { tinh: 'Hà Nội', provinceId: '', wardId: '', storeId: '' }, { tinh: 'Cần Thơ', provinceId: '', wardId: '', storeId: '' }];
+// Mã lấy từ danh sách cửa hàng công khai của BHX. Đổi được trong tab Giá đối thủ.
+const PRICE_DEFAULT = [{ tinh: 'Hồ Chí Minh', provinceId: '1027', wardId: '100675', storeId: '6834' }, { tinh: 'Hà Nội', provinceId: '1000', wardId: '103282', storeId: '30964' }, { tinh: 'Cần Thơ', provinceId: '1032', wardId: '100166', storeId: '14387' }];
 const PRICE_CATS = [10338, 10340, 11238, 2282, 2286, 2289, 2382, 2385, 2386, 2387, 2388, 2403, 2443, 2444, 2446, 2463, 2464, 2465, 2483, 2484, 2485, 2486, 2490, 2491, 2493, 2504, 2507, 2510, 2511, 2513, 2516, 2517, 2519, 2524, 2526, 2530, 2563, 2564, 2565, 2566, 2567, 2683, 2687, 2787, 2803, 2804, 2806, 2809, 2883, 2903, 2943, 2944, 2947, 2965, 3003, 3004, 3023, 3027, 3028, 3063, 3104, 3124, 3187, 3188, 3226, 3233, 3234, 3235, 3237, 3238, 3265, 3345, 3357, 3358, 3359, 3360, 3361, 3362, 3364, 3365, 3368, 3465, 3485, 3487, 3507, 3525, 3708, 3727, 3728, 3732, 3740, 4326, 4352, 4585, 4888, 4929, 5226, 5436, 56, 5872, 6553, 6562, 6597, 6653, 6658, 7068, 7082, 7083, 7086, 7143, 7162, 7170, 7171, 7199, 7259, 7459, 7462, 7478, 7480, 7558, 7579, 7618, 7622, 7694, 7779, 8139, 8158, 8159, 8160, 8163, 8271, 8275, 8285, 8286, 8318, 8320, 8338, 8400, 8638, 8678, 8779, 8781, 8782, 8783, 8785, 8788, 8790, 8820, 8938, 8966, 9027, 9081, 9498];
 
 function priceProps_() { return PropertiesService.getScriptProperties(); }
@@ -1020,8 +1021,10 @@ function savePriceConfig_(raw) {
   return priceConfig_();
 }
 function priceHeaders_() {
-  const h = { Accept: 'application/json, text/plain, */*', Origin: 'https://www.bachhoaxanh.com', Referer: 'https://www.bachhoaxanh.com/', 'referer-url': 'https://www.bachhoaxanh.com/', platform: 'webnew', reversehost: 'http://bhxapi.live' };
-  Object.keys(PRICE_SECRETS).forEach(function (k) { h[k] = priceProps_().getProperty(PRICE_SECRETS[k]); });
+  // Trang BHX gọi API này cho khách chưa đăng nhập với đúng các header công khai dưới đây, không cần token.
+  const h = { Accept: 'application/json, text/plain, */*', Origin: 'https://www.bachhoaxanh.com', Referer: 'https://www.bachhoaxanh.com/', 'referer-url': 'https://www.bachhoaxanh.com/', platform: 'webnew', reversehost: 'http://bhxapi.live', xapikey: 'bhx-api-core-2022' };
+  // Có nhập trong Script Properties thì dùng, không có thì chạy như khách.
+  Object.keys(PRICE_SECRETS).forEach(function (k) { const v = priceProps_().getProperty(PRICE_SECRETS[k]); if (v) h[k] = v; });
   return h;
 }
 // Thông báo lỗi không chứa header hay token.
@@ -1035,7 +1038,7 @@ function priceFetch_(headers, prov, cat, page) {
     try { res = UrlFetchApp.fetch(PRICE_URL, { method: 'post', contentType: 'application/json', headers: headers, payload: JSON.stringify(payload), muteHttpExceptions: true }); }
     catch (_) { last = 'không kết nối được'; continue; }
     const code = res.getResponseCode();
-    if (code === 401 || code === 403) throw err_('BHX từ chối (' + code + '): token có thể đã hết hạn hoặc BHX chặn lệnh gọi từ máy chủ Google. Thay token rồi bấm Tiếp tục.', 'PRICE_STOP');
+    if (code === 401 || code === 403) throw err_('BHX từ chối (' + code + '): thiếu token, token đã hết hạn (token đăng nhập có thể chỉ sống vài phút), hoặc BHX chặn lệnh gọi từ máy chủ Google.', 'PRICE_STOP');
     if (code === 429) throw err_('BHX báo gọi quá nhiều (429). Đợi một lúc rồi bấm Tiếp tục.', 'PRICE_STOP');
     if (code !== 200) { last = 'HTTP ' + code; continue; }
     try { const d = JSON.parse(res.getContentText()); return (d.data && d.data.products) || []; } catch (_) { last = 'phản hồi không phải JSON'; }
@@ -1045,20 +1048,19 @@ function priceFetch_(headers, prov, cat, page) {
 // Cùng quy tắc với notebook và file Excel: mức giảm tính từ giá; không tính được mới dùng % của API.
 function priceRow_(raw, prov) {
   const d = raw && raw.data ? raw.data : raw, num = function (v) { const x = Number(v); return isFinite(x) ? x : 0; };
-  const pr = Array.isArray(d.productPrices) && d.productPrices[0] ? d.productPrices[0] : {}, camp = d.campaignInfo || d.promotionInfo || null;
+  const list = d.lstCampaingInfo;
+  const pr = Array.isArray(d.productPrices) && d.productPrices[0] ? d.productPrices[0] : {}, camp = d.campaignInfo || d.promotionInfo || (Array.isArray(list) && list[0]) || null;
   const price = num(pr.price !== undefined ? pr.price : d.price), sys = num(pr.sysPrice !== undefined ? pr.sysPrice : (d.sysPrice || d.originalPrice)), flash = camp ? num(camp.price) : 0;
   const final = flash > 0 && flash < price ? flash : price, base = sys > final ? sys : price;
   let off = base > 0 && final > 0 ? 1 - final / base : 0;
   if (off < 0.005) off = num((camp && camp.discountPercent) || (pr.discountPercent !== undefined ? pr.discountPercent : d.discountPercent)) / 100;
   if (!(off > 0 && off < 1)) off = 0;
-  const title = String((camp ? camp.title || camp.name : d.promotionText) || '').trim();
-  return { tinh: prov.tinh, store: prov.storeId, id: String(d.id === undefined || d.id === null ? '' : d.id), code: d.productCode || d.barcode || '', name: d.name || d.productName || '', cat: d.categoryName || '', brand: d.brandName || '', unit: d.unitName || d.quantityUnit || '',
-    url: d.url ? 'https://www.bachhoaxanh.com' + d.url : '', final: final, base: base, off: off, promo: off > 0 || title !== '' || !!camp, can: d.isCanBuy !== false, title: title };
+  const title = String((camp && (camp.title || camp.name)) || d.promotionText || '').trim();
+  return { tinh: prov.tinh, store: prov.storeId, id: String(d.id === undefined || d.id === null ? '' : d.id), code: d.productCode || d.barcode || '', name: d.name || d.productName || '', cat: (d.category && d.category.name) || d.categoryName || '', brand: d.brandName || '', unit: d.unit || d.unitName || d.quantityUnit || '',
+    url: d.url ? 'https://www.bachhoaxanh.com' + d.url : '', final: final, base: base, off: off, promo: off > 0 || title !== '' || !!camp, can: pr.isCanBuy !== false && d.isCanBuy !== false, title: title };
 }
 // Thử kết nối: chỉ trả số đếm, không lưu gì.
 function priceTest_() {
-  const miss = priceMissing_();
-  if (miss.length) throw new Error('Thiếu trong Script Properties: ' + miss.join(', '));
   const headers = priceHeaders_();
   return priceProvinces_().map(function (p) {
     if (!priceReady_(p)) return { tinh: p.tinh, ok: false, msg: 'Chưa điền đủ mã' };
@@ -1077,8 +1079,6 @@ function priceTest_() {
 function priceTmpClear_() { const s = db_().getSheetByName('price_tmp'); if (s) writeAll_('price_tmp', []); }
 // Bấm Cập nhật: có lần dở dang của hôm nay thì chạy tiếp, nếu không thì bắt đầu lần mới.
 function priceStart_(u) {
-  const miss = priceMissing_();
-  if (miss.length) throw new Error('Thiếu trong Script Properties: ' + miss.join(', '));
   const provinces = priceProvinces_();
   provinces.forEach(function (p) { if (!priceReady_(p)) throw new Error(p.tinh + ': chưa điền đủ provinceId, wardId, storeId'); });
   return withLock_(function () {
