@@ -42,7 +42,7 @@ const TABS = {
   comp_changes: ['detected_on', 'chain', 'type', 'store_id', 'ten', 'dia_chi', 'tinh', 'lat', 'lng', 'old_lat', 'old_lng'],
   access_log:  ['at', 'email', 'event'],
 };
-const WM_COLS = ['ma', 'ten', 'tinh', 'lat', 'lng', 'khu_vuc', 'chuoi', 'dia_chi', 'vung', 'mien', 'quan'];
+const WM_COLS = ['ma', 'ten', 'tinh', 'lat', 'lng', 'khu_vuc', 'chuoi', 'dia_chi', 'vung', 'mien', 'quan', 'phuong'];
 
 // ───────────────────────── HTTP ─────────────────────────
 function doGet() {
@@ -81,6 +81,7 @@ function route_(req) {
   if (a === 'snapshot') return snapshot_();
   if (a === 'changes') return changes_();
   if (a === 'settings') return settings_();
+  if (a === 'route') return roadRoute_(req.points);
   // Chỉ Admin
   if (['versions', 'publishWm', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
     if (u.role !== 'admin') throw new Error('Chỉ Admin được làm thao tác này');
@@ -297,10 +298,10 @@ function liveVersion_() {
 }
 function readWmFile_(fileId) {
   const v = SpreadsheetApp.openById(fileId).getSheets()[0].getDataRange().getValues();
-  // File cũ ít cột hơn → khu_vuc/dia_chi/vung/mien/quan rỗng, chuoi mặc định WM+
+  // File cũ ít cột hơn → khu_vuc/dia_chi/vung/mien/quan/phuong rỗng, chuoi mặc định WM+
   return v.slice(1).map(function (r) {
     return { ma: String(r[0]), ten: String(r[1] || r[0]), tinh: String(r[2]), lat: Number(r[3]), lng: Number(r[4]),
-      khu_vuc: String(r[5] || ''), chuoi: String(r[6] || 'WM+'), dia_chi: String(r[7] || ''), vung: String(r[8] || ''), mien: String(r[9] || ''), quan: String(r[10] || '') };
+      khu_vuc: String(r[5] || ''), chuoi: String(r[6] || 'WM+'), dia_chi: String(r[7] || ''), vung: String(r[8] || ''), mien: String(r[9] || ''), quan: String(r[10] || ''), phuong: String(r[11] || '') };
   });
 }
 
@@ -374,7 +375,7 @@ function validateWm_(rows) {
     const chuoi = String(r.chuoi || 'WM+');
     if (chuoi !== 'WM+' && chuoi !== 'WMT') throw new Error('Mã ' + ma + ': chuỗi phải là WM+ hoặc WMT');
     return { ma: ma, ten: String(r.ten || ma).slice(0, 200), tinh: String(r.tinh || '').slice(0, 100), lat: lat, lng: lng,
-      khu_vuc: String(r.khu_vuc || '').slice(0, 30), chuoi: chuoi, dia_chi: String(r.dia_chi || '').slice(0, 300), vung: String(r.vung || '').slice(0, 50), mien: String(r.mien || '').slice(0, 50), quan: String(r.quan || '').slice(0, 50) };
+      khu_vuc: String(r.khu_vuc || '').slice(0, 30), chuoi: chuoi, dia_chi: String(r.dia_chi || '').slice(0, 300), vung: String(r.vung || '').slice(0, 50), mien: String(r.mien || '').slice(0, 50), quan: String(r.quan || '').slice(0, 50), phuong: String(r.phuong || '').slice(0, 50) };
   });
 }
 
@@ -386,7 +387,7 @@ function publishWm_(u, rowsRaw) {
     const version = 'v' + (all.length + 1);
     const ss = SpreadsheetApp.create('WM_upload_' + version + '_' + Utilities.formatDate(new Date(), CFG.TZ, 'yyyyMMdd_HHmm'));
     const sh = ss.getSheets()[0];
-    sh.getRange('A:K').setNumberFormat('@');
+    sh.getRange('A:L').setNumberFormat('@');
     sh.getRange(1, 1, rows.length + 1, WM_COLS.length).setValues([WM_COLS].concat(rows.map(function (r) { return WM_COLS.map(function (k) { return r[k]; }); })));
     DriveApp.getFileById(ss.getId()).moveTo(uploadFolder_());
 
@@ -612,6 +613,33 @@ function syncBhxDaily() {
     Logger.log(msg);
     throw e;            // để Apps Script gửi mail báo lỗi trigger cho chủ project
   }
+}
+
+// ───────────────────────── Đường đi thực tế ─────────────────────────
+// Dịch vụ Maps có sẵn của Apps Script (không cần khoá API, hạn mức theo tài khoản). points[0] là điểm xuất phát, sau đó là các điểm dừng theo thứ tự web đã xếp.
+// Mỗi chặng tối đa 23 điểm giữa đường + 1 điểm cuối; Google xếp lại thứ tự trong chặng, điểm cuối của chặng giữ nguyên.
+const ROUTE_CHUNK = 24, ROUTE_MAX = 50;
+function roadRoute_(pointsRaw) {
+  const b = CFG.BBOX, pts = (Array.isArray(pointsRaw) ? pointsRaw : []).map(function (p) { return { lat: Number(p && p.lat), lng: Number(p && p.lng) }; });
+  if (pts.length < 2 || pts.length > ROUTE_MAX + 1) throw new Error('Số điểm của tuyến không hợp lệ');
+  pts.forEach(function (p) { if (!(p.lat >= b[0] && p.lat <= b[1] && p.lng >= b[2] && p.lng <= b[3])) throw new Error('Có điểm nằm ngoài lãnh thổ VN'); });
+  const order = [], legs = [], polys = [];
+  for (let a = 1; a < pts.length; a += ROUTE_CHUNK) {
+    const n = Math.min(ROUTE_CHUNK, pts.length - a), from = order.length ? pts[order[order.length - 1] + 1] : pts[0], last = pts[a + n - 1];
+    const finder = Maps.newDirectionFinder().setOrigin(from.lat, from.lng).setDestination(last.lat, last.lng)
+      .setMode(Maps.DirectionFinder.Mode.DRIVING).setOptimizeWaypoints(true).setRegion('vn').setLanguage('vi');
+    for (let k = a; k < a + n - 1; k++) finder.addWaypoint(pts[k].lat, pts[k].lng);
+    let res;
+    try { res = finder.getDirections(); }
+    catch (e) { throw new Error('Google chưa tính được đường đi: ' + String(e.message || e).slice(0, 200)); }
+    const r = res && res.routes && res.routes[0];
+    if (!r) throw new Error('Không tìm được đường đi (' + (res && res.status) + ')');
+    (r.waypoint_order || []).forEach(function (w) { order.push(a - 1 + w); });
+    order.push(a + n - 2);
+    r.legs.forEach(function (l) { legs.push({ km: l.distance.value / 1000, min: l.duration.value / 60 }); });
+    polys.push(r.overview_polyline.points);
+  }
+  return { order: order, legs: legs, polys: polys };
 }
 
 // ───────────────────────── Tự lấy các chuỗi khác (lịch 07:00) ─────────────────────────
