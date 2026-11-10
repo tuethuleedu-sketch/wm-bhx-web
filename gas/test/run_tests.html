@@ -118,7 +118,7 @@
     && !!call("login", { email: "viewer@gmail.com", password: "viewer-pw-moi" }).error, r);
   clearFail("viewer@gmail.com");
   viewer = login("viewer@gmail.com");
-  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "publishPrices", "priceConfig", "savePriceConfig", "priceTest", "priceStart", "priceStep", "priceFinish", "priceCancel", "botStatus", "askClaude", "setSetting", "addUser", "removeUser", "resetPassword"]) {
+  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "publishPrices", "priceConfig", "savePriceConfig", "priceTest", "priceStart", "priceStep", "priceFinish", "priceCancel", "botStatus", "askBot", "setSetting", "addUser", "removeUser", "resetPassword"]) {
     r = call(a, { token: viewer.token, email: "a@b.co", role: "admin", rows: [], key: "viewer_can_export", value: false });
     check(`viewer KHÔNG gọi được ${a}`, /Chỉ Admin/.test(r.error), r);
   }
@@ -470,44 +470,56 @@
   check("không có lịch tự chạy lấy giá", M.triggers.length === before3 && !M.triggers.some((t) => /price/i.test(t.getHandlerFunction())));
   SECRET_NAMES.forEach((k) => M.props.delete(k));
 
-  // ---- Bot Claude ----
+  // ---- Bot Gemini ----
   const BOT_CTX = { pham_vi: { tinh: "Hà Nội" }, chi_so: { so_sku: 5 } };
   r = adm("botStatus");
   check("chưa có key: báo chưa có, không lộ gì", r.ok && r.data.hasKey === false && r.data.used === 0, r);
-  r = adm("askClaude", { question: "x", context: BOT_CTX });
-  check("chưa có key: không gọi được", /CLAUDE_API_KEY/.test(r.error), r);
-  M.props.set("CLAUDE_API_KEY", "KHOA-THAT");
+  r = adm("askBot", { question: "x", context: BOT_CTX });
+  check("chưa có key: không gọi được", /GEMINI_API_KEY/.test(r.error), r);
+  M.props.set("GEMINI_API_KEY", "KHOA-THAT");
   check("trạng thái không chứa key", !JSON.stringify(adm("botStatus")).includes("KHOA-THAT"));
   let botReq = null, botMode = "ok";
+  const gErr = (http, code, message) => ({ code: http, body: { error: { code, message } } });
   M.fetchHandler = (url, opts) => {
     botReq = { url, h: opts.headers, b: JSON.parse(opts.payload) };
-    if (botMode === "401") return { code: 401, body: { error: { message: "KHOA-THAT sai" } } };
-    if (botMode === "429") return { code: 429, body: {} };
-    if (botMode === "refusal") return { code: 200, body: { stop_reason: "refusal", content: [] } };
-    return { code: 200, body: { stop_reason: botMode === "long" ? "max_tokens" : "end_turn", content: [{ type: "thinking", thinking: "" }, { type: "text", text: "Nhận định" }] } };
+    if (botMode === "401") return gErr(401, "authentication", "KHOA-THAT sai");
+    if (botMode === "429") return gErr(429, "rate_limit_exceeded", "slow");
+    if (botMode === "quota") return gErr(429, "quota_exceeded", "day");
+    if (botMode === "403") return gErr(403, "permission_denied", "free tier not available");
+    if (botMode === "bad") return gErr(400, "invalid_request", "field KHOA-THAT bad");
+    if (botMode === "model") return gErr(404, "model_not_found", "x");
+    if (botMode === "503") return gErr(503, "service_unavailable", "x");
+    if (botMode === "safety") return gErr(400, "safety", "blocked");
+    if (botMode === "net") throw new Error("Address unavailable KHOA-THAT");
+    if (botMode === "empty") return { code: 200, body: { steps: [{ type: "thought", content: [{ text: "suy" }] }] } };
+    if (botMode === "steps") return { code: 200, body: { steps: [{ type: "user_input", content: [{ text: "hỏi" }] }, { type: "thought", content: [{ text: "suy" }] }, { type: "model_output", content: [{ type: "text", text: "Từ steps" }] }] } };
+    return { code: 200, body: { output_text: "Nhận định" } };
   };
-  r = adm("askClaude", { question: "Tóm tắt", context: BOT_CTX, history: [{ q: "a", a: "b" }] });
-  check("hỏi được, chỉ lấy phần chữ, không trả key", r.ok && r.data.text === "Nhận định" && r.data.used === 1 && !JSON.stringify(r).includes("KHOA-THAT"), r);
-  check("gọi đúng API Claude, key nằm ở header", botReq.url === "https://api.anthropic.com/v1/messages" && botReq.h["x-api-key"] === "KHOA-THAT" && botReq.b.model === "claude-haiku-5-5" && botReq.b.output_config.effort === "medium" && !("fallbacks" in botReq.b) && !botReq.h["anthropic-beta"] && !JSON.stringify(botReq.b).includes("KHOA-THAT"));
-  check("số liệu nằm trong thẻ data, kèm lịch sử", botReq.b.messages.length === 3 && /<data>/.test(botReq.b.messages[2].content) && /Tóm tắt/.test(botReq.b.messages[2].content));
-  r = adm("askClaude", { question: "x", context: { pham_vi: {}, danh_sach_wm: [{ ma: "S1" }] } });
-  check("số liệu có nhóm lạ (vd danh sách WM) → chặn, không gọi Claude", /không được phép gửi/.test(r.error), r);
-  r = adm("askClaude", { question: "x".repeat(1001), context: BOT_CTX });
-  check("câu hỏi quá dài → lỗi", /dài quá/.test(r.error), r);
-  botMode = "401"; r = adm("askClaude", { question: "x", context: BOT_CTX });
-  check("key sai: báo rõ, không kèm phản hồi thô, không tính lượt", /từ chối API key/.test(r.error) && !JSON.stringify(r).includes("KHOA-THAT") && adm("botStatus").data.used === 1, r);
-  botMode = "429"; r = adm("askClaude", { question: "x", context: BOT_CTX });
-  check("bị giới hạn: báo rõ", /giới hạn/.test(r.error), r);
-  botMode = "refusal"; r = adm("askClaude", { question: "x", context: BOT_CTX });
-  check("Claude từ chối: báo rõ", /từ chối trả lời/.test(r.error), r);
-  botMode = "long"; r = adm("askClaude", { question: "x", context: BOT_CTX });
-  check("câu trả lời bị cắt: có ghi chú", r.ok && /bị cắt/.test(r.data.text), r);
-  check("nhật ký không ghi nội dung câu hỏi", sheetRows("access_log").some((x) => x[2] === "bot") && !sheetRows("access_log").flat().some((v) => /Tóm tắt/.test(String(v))));
+  r = adm("askBot", { question: "Tóm tắt", context: BOT_CTX, history: [{ q: "a", a: "b" }] });
+  check("hỏi được, không trả key", r.ok && r.data.text === "Nhận định" && r.data.used === 1 && !JSON.stringify(r).includes("KHOA-THAT"), r);
+  check("gọi đúng API Gemini, key nằm ở header, không nằm trong URL", /generativelanguage\.googleapis\.com\/v1beta\/interactions$/.test(botReq.url) && botReq.h["x-goog-api-key"] === "KHOA-THAT" && !botReq.url.includes("KHOA-THAT") && botReq.b.model === "gemini-3.5-flash-lite" && !JSON.stringify(botReq.b).includes("KHOA-THAT"));
+  check("không lưu hội thoại phía Google, đúng mức suy luận", botReq.b.store === false && botReq.b.generation_config.thinking_level === "medium" && botReq.b.generation_config.max_output_tokens === 8000);
+  check("số liệu nằm trong thẻ data, kèm câu trước", /<data>/.test(botReq.b.input) && /Tóm tắt/.test(botReq.b.input) && /<cau_truoc>/.test(botReq.b.input));
+  botMode = "steps"; r = adm("askBot", { question: "x", context: BOT_CTX });
+  check("không có output_text: lấy chữ ở bước cuối, bỏ phần suy luận", r.ok && r.data.text === "Từ steps", r);
+  const fails = [["401", /API key không hợp lệ/, "key sai"], ["429", /gọi quá nhanh/, "gọi quá nhanh"], ["quota", /hết hạn mức/, "hết hạn mức miễn phí"], ["403", /free tier not available/, "403 hiện lý do"], ["bad", /field/, "400 hiện lý do"], ["model", /gemini-3\.5-flash-lite/, "sai model"], ["503", /quá tải/, "quá tải"], ["safety", /chặn/, "bị chặn"], ["net", /chưa gọi được Gemini.*Address unavailable/, "lỗi mạng"], ["empty", /không trả về nội dung/, "không có chữ"]];
+  const usedB4 = adm("botStatus").data.used;
+  fails.forEach(([m, re, name]) => { botMode = m; const x = adm("askBot", { question: "x", context: BOT_CTX }); check("lỗi " + name + ": báo đúng, che key", re.test(x.error) && !JSON.stringify(x).includes("KHOA-THAT"), x); });
+  check("lỗi không tính lượt hỏi", adm("botStatus").data.used === usedB4);
   botMode = "ok";
+  r = adm("askBot", { question: "x", context: { pham_vi: {}, danh_sach_wm: [{ ma: "S1" }] } });
+  check("số liệu có nhóm lạ (vd danh sách WM) → chặn, không gọi Gemini", /không được phép gửi/.test(r.error), r);
+  r = adm("askBot", { question: "x".repeat(1001), context: BOT_CTX });
+  check("câu hỏi quá dài → lỗi", /dài quá/.test(r.error), r);
+  M.props.set("GEMINI_API_KEY", "  KHOA-THAT\n");
+  r = adm("askBot", { question: "x", context: BOT_CTX });
+  check("key dán thừa dấu cách vẫn dùng được", r.ok && botReq.h["x-goog-api-key"] === "KHOA-THAT", r);
+  M.props.set("GEMINI_API_KEY", "KHOA-THAT");
+  check("nhật ký không ghi nội dung câu hỏi", sheetRows("access_log").some((x) => x[2] === "bot") && !sheetRows("access_log").flat().some((v) => /Tóm tắt/.test(String(v))));
   M.props.set("bot_used:" + Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd"), "30");
-  r = adm("askClaude", { question: "x", context: BOT_CTX });
-  check("hết lượt trong ngày: không gọi Claude", /hết 30 lượt/.test(r.error), r);
-  M.props.delete("CLAUDE_API_KEY");
+  r = adm("askBot", { question: "x", context: BOT_CTX });
+  check("hết lượt trong ngày: không gọi Gemini", /hết 30 lượt/.test(r.error), r);
+  M.props.delete("GEMINI_API_KEY");
 
   // ---- Thu hồi quyền, nhật ký, đăng xuất ----
   r = call("removeUser", { token: admin.token, email: OWNER });
