@@ -935,6 +935,22 @@
     finally { btn.disabled = false; }
   });
   $("#login-reset").addEventListener("click", () => setNewPwStep(false));
+  // Bản Firebase: tự tạo mật khẩu lần đầu và tự đặt lại mật khẩu qua email.
+  if (API.fb) {
+    $("#fb-links").hidden = false;
+    $("#fb-first").addEventListener("click", async () => {
+      const email = $("#login-email").value.trim().toLowerCase(), pw = $("#login-pw").value, msg = $("#login-msg");
+      if (!email || pw.length < 8) { msg.textContent = "Nhập email và mật khẩu mới từ 8 ký tự, rồi bấm lại."; return; }
+      try { await API.fbRegister(email, pw); msg.textContent = "Đã gửi thư xác nhận tới email. Hãy mở thư, bấm xác nhận rồi đăng nhập."; }
+      catch (err) { msg.textContent = err.message; }
+    });
+    $("#fb-forgot").addEventListener("click", async () => {
+      const email = $("#login-email").value.trim().toLowerCase(), msg = $("#login-msg");
+      if (!email) { msg.textContent = "Nhập email rồi bấm lại."; return; }
+      try { await API.fbForgot(email); msg.textContent = "Đã gửi thư đặt lại mật khẩu nếu email có trong hệ thống."; }
+      catch (err) { msg.textContent = err.message; }
+    });
+  }
   if (API.mode === "demo") $("#login-msg").textContent = 'Demo: mật khẩu bất kỳ. Nhập "tam" để xem bước đặt mật khẩu mới.';
   $("#pw-open").addEventListener("click", () => { $("#pw-form").reset(); $("#pw-msg").textContent = ""; $("#pw-dialog").showModal(); });
   $("#pw-cancel").addEventListener("click", () => $("#pw-dialog").close());
@@ -1036,7 +1052,7 @@
     const pwEm = e.target.dataset.pw;
     if (pwEm) {
       if (!confirm(`Cấp mật khẩu tạm mới cho ${pwEm}? Mật khẩu cũ sẽ hết hiệu lực và người đó bị đăng xuất.`)) return;
-      try { showTempPw(pwEm, (await API.resetPassword(pwEm)).tempPassword); }
+      try { const r = await API.resetPassword(pwEm); if (r.sent) window.alert("Đã gửi thư đặt lại mật khẩu tới " + pwEm); else showTempPw(pwEm, r.tempPassword); }
       catch (err) { $("#u-msg").textContent = err.message; }
       return;
     }

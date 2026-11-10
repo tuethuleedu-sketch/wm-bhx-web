@@ -10,7 +10,7 @@
       try { sessionStorage.removeItem(KEY); v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (_) {}
     },
   };
-  let token = store.get(), boot = null;
+  let token = store.get(), boot = null, tokenFn = null;
   function decodePolyline(s) {
     const out = [];
     let i = 0, lat = 0, lng = 0;
@@ -22,10 +22,11 @@
 
   async function call(action, payload = {}) {
     let r;
+    const tk = tokenFn ? await tokenFn() : token;
     try {
       // text/plain → không có preflight CORS; Apps Script chuyển hướng sang googleusercontent rồi trả JSON
       r = await fetch(CFG.gasUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ action, token, ...payload }), redirect: "follow", credentials: "omit" });
+        body: JSON.stringify({ action, token: tk, ...payload }), redirect: "follow", credentials: "omit" });
     } catch (_) { throw new Error("Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại."); }
     if (!r.ok) throw new Error(`Máy chủ lỗi (${r.status})`);
     const j = await r.json();
@@ -38,8 +39,9 @@
 
   window.GasAPI = {
     mode: "gas",
+    _setTokenFn: (fn) => (tokenFn = fn),
     async currentUser() {
-      if (!token) return null;
+      if (!token && !tokenFn) return null;
       // Mở lại bằng phiên đã lưu: lấy luôn dữ liệu ban đầu trong cùng 1 lần gọi, getBoot dùng lại kết quả này.
       // Chỉ phiên hết hạn mới về màn hình đăng nhập; máy chủ lỗi tạm thời thì báo lỗi, phiên vẫn giữ.
       try { boot = await call("boot", { resume: true }); return boot.me; }
@@ -85,6 +87,7 @@
     priceStep: (jobId) => call("priceStep", { jobId }),
     priceFinish: (jobId) => call("priceFinish", { jobId }),
     priceCancel: () => call("priceCancel"),
+    priceAutoStores: () => call("priceAutoStores"),
     botStatus: () => call("botStatus"),
     saveBotKey: (key) => call("saveBotKey", { key }),
     askBot: (question, context, history) => call("askBot", { question, context, history }),

@@ -58,7 +58,16 @@ window.WMPrice = (function () {
     const msg = $("#p-msg");
     try { D = prepare(await API.getPrices()); }
     catch (err) { msg.textContent = `Chưa tải được dữ liệu giá: ${err.message}`; return; }
-    pickProvince(); fillSelects(); render();
+    pickProvince(); fillSelects(); await ensureHist(); render();
+  }
+  // Bản Firebase chỉ tải lịch sử của tỉnh đang xem.
+  async function ensureHist() {
+    if (!C || !API.getPriceHist || C.histLoaded) return;
+    C.histLoaded = true;
+    try {
+      (await API.getPriceHist(C.tinh)).forEach(([d, tinh, id, final, base]) => { const k = tinh + "|" + id; if (!D.series.has(k)) D.series.set(k, []); D.series.get(k).push([d, final, base]); });
+      D.series.forEach((s, k) => { if (k.startsWith(C.tinh + "|")) s.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)); });
+    } catch (err) { C.histLoaded = false; $("#p-msg").textContent = `Chưa tải được lịch sử giá: ${err.message}`; }
   }
   async function readFile(file) {
     const msg = $("#p-msg"), save = $("#p-save");
@@ -270,7 +279,7 @@ window.WMPrice = (function () {
     const refresh = () => { F.page = 0; if (D) render(); };
     $("#p-file").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) readFile(f); });
     $("#p-save").addEventListener("click", () => savePending(false));
-    $("#p-tinh").addEventListener("change", (e) => { F.tinh = e.target.value; F.page = 0; pickProvince(); fillSelects(); render(); });
+    $("#p-tinh").addEventListener("change", async (e) => { F.tinh = e.target.value; F.page = 0; pickProvince(); fillSelects(); await ensureHist(); render(); });
     $("#p-cat").addEventListener("change", (e) => { F.cat = e.target.value; refresh(); });
     $("#p-brand").addEventListener("change", (e) => { F.brand = e.target.value; refresh(); });
     $("#p-promo").addEventListener("change", (e) => { F.promo = e.target.checked; refresh(); });
@@ -377,6 +386,14 @@ window.WMPrice = (function () {
       try { showConfig(await API.priceCancel()); $("#p-job").textContent = "Đã huỷ."; }
       catch (err) { $("#p-job").textContent = `Chưa huỷ được: ${err.message}`; }
     });
+    if (API.fbPrice) {
+      $("#p-cfg-auto").hidden = false;
+      $("#p-cfg-auto").addEventListener("click", async () => {
+        const msg = $("#p-cfg-msg"); msg.textContent = "Đang lấy danh sách tỉnh…";
+        try { const list = await API.priceAutoStores(); $("#t-p-cfg tbody").innerHTML = list.map(cfgRow).join(""); msg.textContent = `Có ${list.length} tỉnh. Bấm Lưu thiết lập để dùng.`; }
+        catch (err) { msg.textContent = err.message; }
+      });
+    }
     $("#p-cfg-add").addEventListener("click", () => $("#t-p-cfg tbody").insertAdjacentHTML("beforeend", cfgRow({ tinh: "", provinceId: "", wardId: "", storeId: "" })));
     $("#t-p-cfg").addEventListener("click", (e) => { if (e.target.dataset.del) e.target.closest("tr").remove(); });
     $("#p-cfg-save").addEventListener("click", async () => {
