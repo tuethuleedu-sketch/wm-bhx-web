@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow, noarchive, noai, noimageai">
   <!-- GitHub Pages không cho đặt header → CSP qua thẻ meta. Chỉ cho tải script từ chính trang + 2 CDN, chỉ gọi API Apps Script. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; connect-src https://script.google.com https://script.googleusercontent.com https://nominatim.openstreetmap.org; base-uri 'none'; form-action 'self'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.sheetjs.com https://agent.aicoworker.net; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com https://agent.aicoworker.net; connect-src https://script.google.com https://script.googleusercontent.com https://nominatim.openstreetmap.org https://agent.aicoworker.net wss://agent.aicoworker.net; frame-src https://agent.aicoworker.net; base-uri 'none'; form-action 'self'; object-src 'none'">
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611041604">
+  <link rel="stylesheet" href="style.css?v=202611101152">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -172,16 +172,16 @@
         </tr></thead><tbody></tbody></table></div></div>
       </div>
 
-      <!-- Bot Claude: chỉ Admin -->
+      <!-- Bot Gemini: chỉ Admin -->
       <div id="bot" data-admin>
-        <button id="bot-open">Hỏi Claude</button>
+        <button id="bot-open">Hỏi Gemini</button>
         <aside id="bot-panel" class="card" hidden>
-          <div class="card-head"><h3>Hỏi Claude về giá đối thủ</h3><button class="link" id="bot-close" title="Đóng">✕</button></div>
+          <div class="card-head"><h3>Hỏi Gemini về giá đối thủ</h3><button class="link" id="bot-close" title="Đóng">✕</button></div>
           <p class="muted small" id="bot-status"></p>
           <div id="bot-log"></div>
           <div id="bot-quick"></div>
           <textarea id="bot-q" rows="2" maxlength="1000" placeholder="Hỏi về giá, khuyến mãi, ngành hàng, các tỉnh…"></textarea>
-          <label class="inline small"><input id="bot-agree" type="checkbox"> Đồng ý gửi câu hỏi và số tổng hợp bên dưới cho Claude (Anthropic)</label>
+          <label class="inline small"><input id="bot-agree" type="checkbox"> Đồng ý gửi câu hỏi và số tổng hợp bên dưới cho Gemini (Google). Bản miễn phí có thể được Google dùng để cải thiện sản phẩm</label>
           <details id="bot-preview" class="small"><summary>Xem số liệu sẽ gửi (theo bộ lọc ở tab Giá đối thủ)</summary><pre id="bot-data"></pre></details>
           <div class="p-actions"><button id="bot-send">Gửi</button><span class="small err" id="bot-msg"></span></div>
           <p class="muted small p-note">Chỉ gửi số tổng hợp giá đối thủ, không gửi tên SKU và dữ liệu WM. Không lưu lịch sử. Hãy đối chiếu nhận định với số trên báo cáo.</p>
@@ -320,14 +320,15 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611041604"></script>
-  <script src="demo-data.js?v=202611041604"></script>
-  <script src="gas-api.js?v=202611041604"></script>
-  <script src="upload.js?v=202611041604"></script>
-  <script src="area.js?v=202611041604"></script>
-  <script src="nearby.js?v=202611041604"></script>
-  <script src="price.js?v=202611041604"></script>
-  <script src="bot.js?v=202611041604"></script>
-  <script src="app.js?v=202611041604"></script>
+  <script src="config.js?v=202611101152"></script>
+  <script src="demo-data.js?v=202611101152"></script>
+  <script src="gas-api.js?v=202611101152"></script>
+  <script src="upload.js?v=202611101152"></script>
+  <script src="area.js?v=202611101152"></script>
+  <script src="nearby.js?v=202611101152"></script>
+  <script src="price.js?v=202611101152"></script>
+  <script src="bot.js?v=202611101152"></script>
+  <script src="app.js?v=202611101152"></script>
+<script src="https://agent.aicoworker.net/s/5djxvlxbqscvvn3krzcd3vkabjpjunsaw57yt6tjotywagq2qega/widget.js" async></script>
 </body>
 </html>

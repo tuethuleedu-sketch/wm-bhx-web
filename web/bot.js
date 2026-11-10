@@ -1,4 +1,4 @@
-// Bot Claude: Admin hỏi, web gửi câu hỏi kèm SỐ TỔNG HỢP giá đối thủ qua Apps Script. API key nằm ở Script Properties, không tới trình duyệt.
+// Bot Gemini: Admin hỏi, web gửi câu hỏi kèm SỐ TỔNG HỢP giá đối thủ qua Apps Script. API key nằm ở Script Properties, không tới trình duyệt.
 // Không gửi tên SKU, không gửi dữ liệu WM, không tự gửi khi mở trang. Trả lời hiển thị dạng chữ thuần, không lưu lịch sử.
 window.WMBot = (function () {
   const $ = (s) => document.querySelector(s);
@@ -16,7 +16,7 @@ window.WMBot = (function () {
   async function refreshStatus() {
     try {
       const s = await API.botStatus();
-      $("#bot-status").textContent = s.hasKey ? `Hôm nay đã hỏi ${s.used}/${s.limit} lần.` : "Chưa có CLAUDE_API_KEY trong Script Properties của Apps Script nên bot chưa trả lời được.";
+      $("#bot-status").textContent = s.hasKey ? `Hôm nay đã hỏi ${s.used}/${s.limit} lần.` : "Chưa có GEMINI_API_KEY trong Script Properties của Apps Script nên bot chưa trả lời được.";
     } catch (err) { $("#bot-status").textContent = err.message; }
   }
   async function refreshData() {
@@ -32,11 +32,11 @@ window.WMBot = (function () {
     if (!$("#bot-agree").checked) { $("#bot-msg").textContent = "Hãy tích ô đồng ý gửi số liệu trước."; return; }
     sending = true; $("#bot-send").disabled = true; $("#bot-msg").textContent = "";
     addTurn("me", q);
-    const wait = addTurn("ai", "Claude đang trả lời…", "wait");
+    const wait = addTurn("ai", "Gemini đang trả lời…", "wait");
     try {
       const context = await refreshData();
       if (!context) throw new Error("Chưa có dữ liệu giá để phân tích.");
-      const r = await API.askClaude(q, context, history);
+      const r = await API.askBot(q, context, history);
       wait.classList.remove("wait"); wait.textContent = r.text;
       history = history.concat([{ q, a: r.text }]).slice(-3);
       $("#bot-q").value = "";

@@ -86,7 +86,7 @@
     priceFinish: (jobId) => call("priceFinish", { jobId }),
     priceCancel: () => call("priceCancel"),
     botStatus: () => call("botStatus"),
-    askClaude: (question, context, history) => call("askClaude", { question, context, history }),
+    askBot: (question, context, history) => call("askBot", { question, context, history }),
     listUsers: () => call("listUsers"),
     addUser: (email, role) => call("addUser", { email, role }),
     removeUser: (email) => call("removeUser", { email }),
