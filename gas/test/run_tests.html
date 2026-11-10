@@ -118,7 +118,7 @@
     && !!call("login", { email: "viewer@gmail.com", password: "viewer-pw-moi" }).error, r);
   clearFail("viewer@gmail.com");
   viewer = login("viewer@gmail.com");
-  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "publishPrices", "priceConfig", "savePriceConfig", "priceTest", "priceStart", "priceStep", "priceFinish", "priceCancel", "botStatus", "askBot", "setSetting", "addUser", "removeUser", "resetPassword"]) {
+  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "publishPrices", "priceConfig", "savePriceConfig", "priceTest", "priceStart", "priceStep", "priceFinish", "priceCancel", "botStatus", "saveBotKey", "askBot", "setSetting", "addUser", "removeUser", "resetPassword"]) {
     r = call(a, { token: viewer.token, email: "a@b.co", role: "admin", rows: [], key: "viewer_can_export", value: false });
     check(`viewer KHÔNG gọi được ${a}`, /Chỉ Admin/.test(r.error), r);
   }
@@ -476,6 +476,14 @@
   check("chưa có key: báo chưa có, không lộ gì", r.ok && r.data.hasKey === false && r.data.used === 0, r);
   r = adm("askBot", { question: "x", context: BOT_CTX });
   check("chưa có key: không gọi được", /GEMINI_API_KEY/.test(r.error), r);
+  r = adm("saveBotKey", { key: "ngan" });
+  check("key sai dạng: báo lỗi, không lưu", /không đúng dạng/.test(r.error) && !M.props.has("GEMINI_API_KEY"), r);
+  r = adm("saveBotKey", { key: "co dau cach o giua key nay dai du" });
+  check("key có dấu cách ở giữa: báo lỗi", /không đúng dạng/.test(r.error), r);
+  const K20 = "AIzaKHOA-DAN-TREN-WEB-1234567890";
+  r = adm("saveBotKey", { key: "  " + K20 + "\n" });
+  check("Admin dán key: lưu vào Script Properties, bỏ khoảng trắng, không trả lại key", r.ok && r.data.hasKey === true && M.props.get("GEMINI_API_KEY") === K20 && !JSON.stringify(r).includes(K20), r);
+  check("nhật ký chỉ ghi có lưu key, không ghi giá trị", sheetRows("access_log").some((x) => x[2] === "bot_key") && !sheetRows("access_log").flat().some((v) => String(v).includes(K20)));
   M.props.set("GEMINI_API_KEY", "KHOA-THAT");
   check("trạng thái không chứa key", !JSON.stringify(adm("botStatus")).includes("KHOA-THAT"));
   let botReq = null, botMode = "ok";
