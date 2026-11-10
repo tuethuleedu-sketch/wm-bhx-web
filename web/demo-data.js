@@ -83,7 +83,7 @@
     { email: "dongnghiep1.demo@example.com", role: "viewer", added: "2026-10-30" },
   ];
 
-  let botUsed = 0, priceStore = null, priceJob = null, priceCfg = [{ tinh: "Hồ Chí Minh", provinceId: "1", wardId: "1", storeId: "1" }, { tinh: "Hà Nội", provinceId: "2", wardId: "2", storeId: "2" }, { tinh: "Cần Thơ", provinceId: "3", wardId: "3", storeId: "3" }];
+  let botHasKey = !/[?&]nokey=1/.test(location.search), botUsed = 0, priceStore = null, priceJob = null, priceCfg = [{ tinh: "Hồ Chí Minh", provinceId: "1", wardId: "1", storeId: "1" }, { tinh: "Hà Nội", provinceId: "2", wardId: "2", storeId: "2" }, { tinh: "Cần Thơ", provinceId: "3", wardId: "3", storeId: "3" }];
   function priceDemo() {
     if (priceStore) return priceStore;
     let seed = 20261104;
@@ -189,7 +189,8 @@
     async priceFinish() { return { ...priceJob }; },
     async priceCancel() { priceJob = null; return { provinces: priceCfg, missing: [], job: null }; },
     // Bot ở bản xem trước: trả lời mẫu dựng từ số liệu, không gọi Gemini và không gửi gì ra ngoài.
-    async botStatus() { return { hasKey: true, used: botUsed, limit: 30 }; },
+    async botStatus() { return { hasKey: botHasKey, used: botUsed, limit: 30 }; },
+    async saveBotKey(k) { await new Promise((r) => setTimeout(r, 200)); if (!/^[\x21-\x7e]{20,200}$/.test(k.trim())) throw new Error("Key không đúng dạng. Hãy chép lại đủ key, không có dấu cách."); botHasKey = true; return { hasKey: true, used: botUsed, limit: 30 }; },
     async askBot(q, ctx) {
       await new Promise((r) => setTimeout(r, 500));
       botUsed++;

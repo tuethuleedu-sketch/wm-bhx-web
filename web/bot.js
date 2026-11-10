@@ -13,10 +13,23 @@ window.WMBot = (function () {
     $("#bot-log").scrollTop = $("#bot-log").scrollHeight;
     return el;
   }
+  function showStatus(s) {
+    $("#bot-status").textContent = s.hasKey ? `Hôm nay đã hỏi ${s.used}/${s.limit} lần.` : "Chưa có key Gemini nên bot chưa trả lời được. Hãy dán key ở ô bên dưới.";
+    $("#bot-key-title").textContent = s.hasKey ? "Đã có key. Bấm để thay key khác" : "Dán key Gemini";
+    $("#bot-key-box").open = !s.hasKey;
+  }
+  async function saveKey() {
+    const input = $("#bot-key"), btn = $("#bot-key-save"), msg = $("#bot-key-msg"), key = input.value;
+    if (!key.trim()) { msg.textContent = "Chưa dán key."; return; }
+    btn.disabled = true; msg.textContent = "Đang lưu…";
+    try { const s = await API.saveBotKey(key); input.value = ""; showStatus(s); msg.textContent = "Đã lưu key."; }
+    catch (err) { msg.textContent = err.message; }
+    btn.disabled = false;
+  }
   async function refreshStatus() {
     try {
       const s = await API.botStatus();
-      $("#bot-status").textContent = s.hasKey ? `Hôm nay đã hỏi ${s.used}/${s.limit} lần.` : "Chưa có GEMINI_API_KEY trong Script Properties của Apps Script nên bot chưa trả lời được.";
+      showStatus(s);
     } catch (err) { $("#bot-status").textContent = err.message; }
   }
   async function refreshData() {
@@ -54,6 +67,8 @@ window.WMBot = (function () {
     });
     $("#bot-close").addEventListener("click", () => { $("#bot-panel").hidden = true; $("#bot-open").hidden = false; });
     $("#bot-quick").addEventListener("click", (e) => { const b = e.target.closest("[data-k]"); if (b) send(QUICK[+b.dataset.k]); });
+    $("#bot-key-save").addEventListener("click", saveKey);
+    $("#bot-key").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveKey(); } });
     $("#bot-send").addEventListener("click", () => send($("#bot-q").value));
     $("#bot-q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send($("#bot-q").value); } });
     $("#bot-preview").addEventListener("toggle", (e) => { if (e.target.open) refreshData().catch(() => {}); });

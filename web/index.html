@@ -9,7 +9,7 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611101311">
+  <link rel="stylesheet" href="style.css?v=202611101332">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -178,6 +178,11 @@
         <aside id="bot-panel" class="card" hidden>
           <div class="card-head"><h3>Hỏi Gemini về giá đối thủ</h3><button class="link" id="bot-close" title="Đóng">✕</button></div>
           <p class="muted small" id="bot-status"></p>
+          <details id="bot-key-box" class="small"><summary id="bot-key-title">Dán key Gemini</summary>
+            <p class="muted p-note">Tạo key tại aistudio.google.com rồi dán vào đây. Key được lưu trong Apps Script và không hiện lại.</p>
+            <div class="p-actions"><input id="bot-key" type="password" maxlength="200" autocomplete="off" spellcheck="false" placeholder="Dán key vào đây"><button id="bot-key-save">Lưu</button></div>
+            <span class="small" id="bot-key-msg"></span>
+          </details>
           <div id="bot-log"></div>
           <div id="bot-quick"></div>
           <textarea id="bot-q" rows="2" maxlength="1000" placeholder="Hỏi về giá, khuyến mãi, ngành hàng, các tỉnh…"></textarea>
@@ -320,14 +325,14 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611101311"></script>
-  <script src="demo-data.js?v=202611101311"></script>
-  <script src="gas-api.js?v=202611101311"></script>
-  <script src="upload.js?v=202611101311"></script>
-  <script src="area.js?v=202611101311"></script>
-  <script src="nearby.js?v=202611101311"></script>
-  <script src="price.js?v=202611101311"></script>
-  <script src="bot.js?v=202611101311"></script>
-  <script src="app.js?v=202611101311"></script>
+  <script src="config.js?v=202611101332"></script>
+  <script src="demo-data.js?v=202611101332"></script>
+  <script src="gas-api.js?v=202611101332"></script>
+  <script src="upload.js?v=202611101332"></script>
+  <script src="area.js?v=202611101332"></script>
+  <script src="nearby.js?v=202611101332"></script>
+  <script src="price.js?v=202611101332"></script>
+  <script src="bot.js?v=202611101332"></script>
+  <script src="app.js?v=202611101332"></script>
 </body>
 </html>

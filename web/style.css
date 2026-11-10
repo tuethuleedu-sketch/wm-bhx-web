@@ -198,6 +198,7 @@ details { margin: 8px 0; } summary { cursor: pointer; font-weight: 600; padding:
 #bot-open { position: fixed; right: 20px; bottom: 20px; z-index: 1500; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
 #bot-panel { position: fixed; right: 20px; bottom: 20px; z-index: 1500; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 60px); overflow: auto; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.25); }
 #bot-panel[hidden] { display: none; }
+#bot-panel > * { flex-shrink: 0; }
 #bot-panel h3 { margin: 0; }
 #bot-log { display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow: auto; }
 #bot-log:empty { display: none; }
@@ -206,6 +207,8 @@ details { margin: 8px 0; } summary { cursor: pointer; font-weight: 600; padding:
 .bot-turn.ai { background: var(--bg); }
 .bot-turn.wait { color: var(--muted); }
 .bot-turn.bad { color: var(--close); }
+#bot-key { flex: 1; min-width: 160px; font: inherit; }
+#bot-key-box p { margin: 6px 0; }
 #bot-quick { display: flex; flex-wrap: wrap; gap: 6px; }
 #bot-quick button { font-size: 12px; padding: 3px 8px; }
 #bot-q { width: 100%; font: inherit; resize: vertical; box-sizing: border-box; }
