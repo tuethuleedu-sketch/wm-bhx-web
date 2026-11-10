@@ -98,7 +98,7 @@ function route_(req) {
   if (a === 'route') return roadRoute_(req.points);
   if (a === 'prices') return prices_();
   // Chỉ Admin
-  if (['versions', 'publishWm', 'publishPrices', 'priceConfig', 'savePriceConfig', 'priceTest', 'priceStart', 'priceStep', 'priceFinish', 'priceCancel', 'botStatus', 'askBot', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
+  if (['versions', 'publishWm', 'publishPrices', 'priceConfig', 'savePriceConfig', 'priceTest', 'priceStart', 'priceStep', 'priceFinish', 'priceCancel', 'botStatus', 'saveBotKey', 'askBot', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
     if (u.role !== 'admin') throw new Error('Chỉ Admin được làm thao tác này');
     if (a === 'versions') return versions_();
     if (a === 'publishWm') return publishWm_(u, req.rows);
@@ -111,6 +111,7 @@ function route_(req) {
     if (a === 'priceFinish') return priceFinish_(u, req.jobId);
     if (a === 'priceCancel') return priceCancel_();
     if (a === 'botStatus') return botStatus_();
+    if (a === 'saveBotKey') return saveBotKey_(u, req.key);
     if (a === 'askBot') return askBot_(u, req.question, req.context, req.history);
     if (a === 'listUsers') return listUsers_();
     if (a === 'addUser') return addUser_(u, req.email, req.role);
@@ -1171,6 +1172,14 @@ function botKey_() { return String(PropertiesService.getScriptProperties().getPr
 function botStatus_() {
   const props = PropertiesService.getScriptProperties();
   return { hasKey: !!botKey_(), used: Number(props.getProperty('bot_used:' + todayVN_())) || 0, limit: CFG.BOT_DAILY };
+}
+// Admin dán key trên web. Chỉ ghi vào Script Properties, không bao giờ trả lại giá trị và không ghi vào nhật ký.
+function saveBotKey_(u, keyRaw) {
+  const key = String(keyRaw || '').trim();
+  if (!/^[\x21-\x7e]{20,200}$/.test(key)) throw new Error('Key không đúng dạng. Hãy chép lại đủ key, không có dấu cách.');
+  PropertiesService.getScriptProperties().setProperty('GEMINI_API_KEY', key);
+  log_(u.email, 'bot_key');
+  return botStatus_();
 }
 // Báo đúng nguyên nhân theo lỗi Gemini trả về. Chỉ lấy mã lỗi và thông báo, đã che key, không kèm phản hồi thô.
 function botApiError_(http, res, key) {
