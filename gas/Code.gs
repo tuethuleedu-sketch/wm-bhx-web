@@ -37,6 +37,7 @@ const CFG = {
   BOT_DAILY: 30,             // số lượt hỏi tối đa mỗi ngày
   BOT_MAX_Q: 1000,
   BOT_MAX_CTX: 30000,
+  FIREBASE_WEB_KEY: 'AIzaSyBXVRExNrdhPRpgQxCjYFcmhCbryMvZ9yw', // mã web công khai của Firebase, chỉ để xác minh đăng nhập
   PRICE_STEP_MS: 240000,     // mỗi lần gọi lấy giá chạy tối đa 4 phút, chừa thời gian ghi dữ liệu
   PRICE_HIST_DAYS: 180,      // tab Giá đối thủ tải lịch sử 180 ngày gần nhất; dữ liệu cũ hơn vẫn được giữ trong Sheet
 };
@@ -98,7 +99,7 @@ function route_(req) {
   if (a === 'route') return roadRoute_(req.points);
   if (a === 'prices') return prices_();
   // Chỉ Admin
-  if (['versions', 'publishWm', 'publishPrices', 'priceConfig', 'savePriceConfig', 'priceTest', 'priceStart', 'priceStep', 'priceFinish', 'priceCancel', 'botStatus', 'saveBotKey', 'askBot', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
+  if (['versions', 'publishWm', 'publishPrices', 'priceConfig', 'savePriceConfig', 'priceTest', 'priceStart', 'priceStep', 'priceFinish', 'priceCancel', 'priceAutoStores', 'botStatus', 'saveBotKey', 'askBot', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
     if (u.role !== 'admin') throw new Error('Chỉ Admin được làm thao tác này');
     if (a === 'versions') return versions_();
     if (a === 'publishWm') return publishWm_(u, req.rows);
@@ -110,6 +111,7 @@ function route_(req) {
     if (a === 'priceStep') return priceStep_(u, req.jobId);
     if (a === 'priceFinish') return priceFinish_(u, req.jobId);
     if (a === 'priceCancel') return priceCancel_();
+    if (a === 'priceAutoStores') return priceAutoStores_();
     if (a === 'botStatus') return botStatus_();
     if (a === 'saveBotKey') return saveBotKey_(u, req.key);
     if (a === 'askBot') return askBot_(u, req.question, req.context, req.history);
@@ -280,8 +282,29 @@ function putSession_(h, email) {
 }
 
 // Kiểm tra quyền MỖI lần gọi → thu hồi quyền có hiệu lực ngay.
+// Token Firebase: hỏi Firebase xác minh rồi nhớ 5 phút để đỡ gọi lại. Quyền vẫn lấy từ danh sách users của Sheet.
+function firebaseUser_(token) {
+  const cache = CacheService.getScriptCache(), k = 'fb:' + sha_(String(token));
+  let email = cache.get(k);
+  if (!email) {
+    let res = null;
+    try { res = UrlFetchApp.fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + CFG.FIREBASE_WEB_KEY, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, payload: JSON.stringify({ idToken: String(token) }) }); }
+    catch (_) { throw new Error('Không xác minh được đăng nhập. Thử lại sau.'); }
+    if (res.getResponseCode() >= 500) throw new Error('Không xác minh được đăng nhập. Thử lại sau.');
+    let u = null;
+    try { u = (JSON.parse(res.getContentText()).users || [])[0]; } catch (_) {}
+    if (res.getResponseCode() !== 200 || !u || !u.email) throw err_('Phiên đăng nhập đã hết hạn — đăng nhập lại', 'AUTH');
+    if (!u.emailVerified) throw err_('Email chưa được xác nhận', 'AUTH');
+    email = String(u.email).toLowerCase();
+    cache.put(k, email, 300);
+  }
+  const role = roleOf_(email);
+  if (!role) { log_(email, 'denied', true); throw err_('Email này chưa được cấp quyền', 'AUTH'); }
+  return { email: email, role: role };
+}
 function session_(token) {
   if (!token) throw err_('Chưa đăng nhập', 'AUTH');
+  if (/^eyJ/.test(String(token))) return firebaseUser_(token);
   const h = sha_(String(token)), props = PropertiesService.getScriptProperties();
   let s = null;
   try { s = JSON.parse(props.getProperty('sess:' + h) || 'null'); } catch (_) {}
@@ -1077,6 +1100,31 @@ function priceTest_() {
       return { tinh: p.tinh, ok: false, msg: 'BHX không trả SKU nào ở 5 ngành đầu' };
     } catch (e) { return { tinh: p.tinh, ok: false, msg: e.message }; }
   });
+}
+// Danh sách tỉnh có BHX, mỗi tỉnh một cửa hàng gần trung tâm các cửa hàng của tỉnh. Tỉnh đã thiết lập thì giữ nguyên cửa hàng cũ.
+function priceAutoStores_() {
+  const pl = bhxFetchJson_([BHX.PROVINCES])[0], keep = {};
+  priceProvinces_().forEach(function (p) { if (priceReady_(p)) keep[p.provinceId] = p; });
+  const provinces = (((pl || {}).data || {}).provinces || []).map(function (p) { return { id: Number(p.id), name: String(p.name || '').replace(/^(Thành phố|Tỉnh)\s+/i, '').trim() }; });
+  const url = function (id, pg) { return BHX.STORES + '?provinceId=' + id + '&wardId=0&pageSize=' + BHX.PAGE + '&pageIndex=' + pg; };
+  const first = bhxFetchJson_(provinces.map(function (p) { return url(p.id, 0); }));
+  const more = [], owner = [];
+  provinces.forEach(function (p, i) { const t = Number(((first[i] || {}).data || {}).total) || 0; for (let pg = 1; pg < Math.ceil(t / BHX.PAGE); pg++) { more.push(url(p.id, pg)); owner.push(i); } });
+  const rest = bhxFetchJson_(more), byP = provinces.map(function () { return []; });
+  first.forEach(function (d, i) { byP[i] = byP[i].concat(findStores_(d) || []); });
+  rest.forEach(function (d, k) { byP[owner[k]] = byP[owner[k]].concat(findStores_(d) || []); });
+  const median = function (a) { const s = a.slice().sort(function (x, y) { return x - y; }); return s[s.length >> 1]; };
+  const out = [];
+  provinces.forEach(function (p, i) {
+    if (keep[String(p.id)]) { out.push(keep[String(p.id)]); return; }
+    const list = byP[i].filter(function (s) { return !isTrue_(s.isStoreVirtual) && String(s.isStoreVirtual) !== '1' && Number(s.lat) && Number(s.lng) && s.storeId && s.wardId; });
+    if (!list.length) return;
+    const la = median(list.map(function (s) { return Number(s.lat); })), lo = median(list.map(function (s) { return Number(s.lng); }));
+    const d = function (s) { return Math.pow(Number(s.lat) - la, 2) + Math.pow(Number(s.lng) - lo, 2); };
+    const best = list.reduce(function (m, s) { return d(s) < d(m) ? s : m; });
+    out.push({ tinh: p.name, provinceId: String(p.id), wardId: String(best.wardId), storeId: String(best.storeId) });
+  });
+  return out;
 }
 function priceTmpClear_() { const s = db_().getSheetByName('price_tmp'); if (s) writeAll_('price_tmp', []); }
 // Bấm Cập nhật: có lần dở dang của hôm nay thì chạy tiếp, nếu không thì bắt đầu lần mới.
