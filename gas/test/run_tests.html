@@ -118,7 +118,7 @@
     && !!call("login", { email: "viewer@gmail.com", password: "viewer-pw-moi" }).error, r);
   clearFail("viewer@gmail.com");
   viewer = login("viewer@gmail.com");
-  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "publishPrices", "priceConfig", "savePriceConfig", "priceTest", "priceStart", "priceStep", "priceFinish", "priceCancel", "botStatus", "saveBotKey", "askBot", "setSetting", "addUser", "removeUser", "resetPassword"]) {
+  for (const a of ["listUsers", "accessLog", "versions", "publishWm", "publishPrices", "priceConfig", "savePriceConfig", "priceTest", "priceStart", "priceStep", "priceFinish", "priceCancel", "priceAutoStores", "botStatus", "saveBotKey", "askBot", "setSetting", "addUser", "removeUser", "resetPassword"]) {
     r = call(a, { token: viewer.token, email: "a@b.co", role: "admin", rows: [], key: "viewer_can_export", value: false });
     check(`viewer KHÔNG gọi được ${a}`, /Chỉ Admin/.test(r.error), r);
   }
@@ -469,6 +469,43 @@
   check("huỷ: xoá lần dở dang", r.ok && r.data.job === null && !sheetRows("price_tmp").length, r);
   check("không có lịch tự chạy lấy giá", M.triggers.length === before3 && !M.triggers.some((t) => /price/i.test(t.getHandlerFunction())));
   SECRET_NAMES.forEach((k) => M.props.delete(k));
+
+  // ---- Đăng nhập Firebase, danh sách tỉnh tự động ----
+  const FB_TOK = "eyJ.fake.token";
+  let fbUser = { email: "Viewer@gmail.com", emailVerified: true }, fbLookups = 0;
+  const fbOld = M.fetchHandler;
+  M.fetchHandler = (url, opts) => {
+    if (/accounts:lookup/.test(url)) { fbLookups++; if (!fbUser) return { code: 400, body: { error: { message: "INVALID_ID_TOKEN" } } }; return { code: 200, body: { users: [fbUser] } }; }
+    return fbOld(url, opts);
+  };
+  r = call("me", { token: FB_TOK });
+  check("token Firebase hợp lệ: nhận đúng email và quyền trong danh sách", r.ok && r.data.email === "viewer@gmail.com" && r.data.role === "viewer", r);
+  const n1 = fbLookups; call("me", { token: FB_TOK });
+  check("token Firebase: nhớ 5 phút, không hỏi lại Firebase mỗi lần", fbLookups === n1);
+  r = call("listUsers", { token: FB_TOK });
+  check("token Firebase của Viewer không gọi được việc của Admin", /Chỉ Admin/.test(r.error), r);
+  fbUser = { email: "la@gmail.com", emailVerified: true };
+  r = call("me", { token: "eyJ.nguoi.la" });
+  check("email chưa cấp quyền: từ chối", r.code === "AUTH" && /chưa được cấp quyền/.test(r.error), r);
+  fbUser = { email: "viewer@gmail.com", emailVerified: false };
+  r = call("me", { token: "eyJ.chua.xac.nhan" });
+  check("email chưa xác nhận: từ chối", r.code === "AUTH", r);
+  fbUser = null;
+  r = call("me", { token: "eyJ.het.han" });
+  check("token hết hạn: yêu cầu đăng nhập lại", r.code === "AUTH", r);
+  check("phiên kiểu cũ vẫn dùng được trong lúc chạy song song", call("me", { token: admin.token }).ok);
+  const prevFetch = M.fetchHandler, cfgOld = M.props.get("price_cfg");
+  M.props.delete("price_cfg");
+  M.fetchHandler = (url) => {
+    if (/GetFull/.test(url)) return { code: 200, body: { data: { provinces: [{ id: 1027, name: "Thành phố Hồ Chí Minh" }, { id: 5, name: "Tỉnh Đồng Nai" }, { id: 6, name: "Tỉnh Trống" }] } } };
+    if (/provinceId=5&/.test(url)) return { code: 200, body: { data: { total: 3, stores: [{ storeId: 1, wardId: 11, lat: 10, lng: 106, isStoreVirtual: false }, { storeId: 2, wardId: 22, lat: 11, lng: 107, isStoreVirtual: false }, { storeId: 3, wardId: 33, lat: 12, lng: 108, isStoreVirtual: false }] } } };
+    if (/provinceId=1027&/.test(url)) return { code: 200, body: { data: { total: 1, stores: [{ storeId: 9, wardId: 99, lat: 10, lng: 106, isStoreVirtual: false }] } } };
+    return { code: 200, body: { data: { total: 0, stores: [] } } };
+  };
+  r = adm("priceAutoStores");
+  check("tự lập danh sách tỉnh: giữ cửa hàng cũ, tỉnh mới chọn cửa hàng giữa, bỏ tỉnh không có cửa hàng", r.ok && r.data.length === 2 && r.data[0].storeId === "6834" && r.data[1].tinh === "Đồng Nai" && r.data[1].storeId === "2" && r.data[1].wardId === "22", r);
+  M.fetchHandler = prevFetch; if (cfgOld) M.props.set("price_cfg", cfgOld);
+  M.fetchHandler = fbOld;
 
   // ---- Bot Gemini ----
   const BOT_CTX = { pham_vi: { tinh: "Hà Nội" }, chi_so: { so_sku: 5 } };

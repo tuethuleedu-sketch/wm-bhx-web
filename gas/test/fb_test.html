@@ -1,0 +1,94 @@
+<!doctype html><meta charset="utf-8"><title>Test firebase-api</title><pre id="out"></pre>
+<script>
+// Firebase và BHX giả trong bộ nhớ, không gọi mạng và không dùng dự án thật.
+localStorage.setItem("wmbhx_fb", "1"); localStorage.removeItem("wmbhx_price_job");
+window.APP_CONFIG = { mode: "gas", gasUrl: "http://gas.test/exec" };
+const store = new Map();
+const docRef = (c, id) => ({ _k: c + "/" + id, id,
+  async get() { const v = store.get(c + "/" + id); return { exists: !!v, id, data: () => v }; },
+  async set(v, o) { store.set(c + "/" + id, o && o.merge ? { ...(store.get(c + "/" + id) || {}), ...v } : v); },
+  async delete() { store.delete(c + "/" + id); } });
+let writes = 0;
+const fbUser = { email: "admin@gmail.com", emailVerified: true, getIdToken: async () => "eyJ.tok", getIdTokenResult: async () => ({ authTime: new Date(window.__authTime || Date.now()).toUTCString() }), sendEmailVerification: async () => { window.__sent = true; } };
+window.__authTime = Date.now();
+const fakeAuth = { currentUser: fbUser, onAuthStateChanged(cb) { setTimeout(cb, 0); return () => {}; }, async signOut() { this.currentUser = null; },
+  async signInWithEmailAndPassword(e, p) { if (p !== "dung") { throw Object.assign(new Error("x"), { code: "auth/invalid-credential" }); } this.currentUser = e === "chuaxn@gmail.com" ? { ...fbUser, emailVerified: false } : fbUser; return { user: this.currentUser }; },
+  async createUserWithEmailAndPassword() { this.currentUser = fbUser; return { user: fbUser }; }, async sendPasswordResetEmail(e) { window.__reset = e; } };
+window.firebase = { initializeApp() {}, auth: Object.assign(() => fakeAuth, { EmailAuthProvider: { credential: () => ({}) } }),
+  firestore: () => ({ collection: (c) => ({ doc: (id) => docRef(c, id), async get() { return { docs: [...store.entries()].filter(([k]) => k.startsWith(c + "/")).map(([k, v]) => ({ id: k.split("/")[1], data: () => v })) }; } }),
+    batch: () => { const ops = []; return { set: (r, v, o) => ops.push(() => r.set(v, o)), async commit() { writes += ops.length; for (const f of ops) await f(); } }; } }) };
+let bhxMode = "ok", priceBump = 0, bhxCalls = 0, sizesSeen = new Set();
+const realFetch = window.fetch;
+window.fetch = async (url, o) => {
+  if (url === "http://gas.test/exec") { const b = JSON.parse(o.body); window.__gasToken = b.token; if (b.action === "boot") return new Response(JSON.stringify({ data: { me: { email: "admin@gmail.com", role: "admin" }, settings: {}, snapshot: {}, changes: [] } })); if (b.action === "listUsers") return new Response(JSON.stringify({ data: [{ email: "Viewer@gmail.com", role: "viewer" }] })); return new Response(JSON.stringify({ data: true })); }
+  if (/AjaxProduct/.test(url)) {
+    bhxCalls++; const b = JSON.parse(o.body); sizesSeen.add(b.PageSize);
+    if (bhxMode === "403") return new Response("{}", { status: 403 });
+    if (bhxMode === "none") return new Response(JSON.stringify({ data: { products: [] } }));
+    if (bhxMode === "few" && b.CategoryId !== 10338) return new Response(JSON.stringify({ data: { products: [] } }));
+    if (b.CategoryId !== 10338 && b.CategoryId !== 10340) return new Response(JSON.stringify({ data: { products: [] } }));
+    const n = bhxMode === "few" ? (b.PageIndex ? 0 : 3) : b.PageIndex === 0 ? 50 : b.PageIndex === 1 ? 5 : 0;
+    return new Response(JSON.stringify({ data: { products: Array.from({ length: n }, (_, i) => ({ id: b.CategoryId * 1000 + b.PageIndex * 100 + i, name: "SP" + i, url: "/x/" + i, unit: "Gói", brandName: "TH", category: { name: "Sữa" }, productPrices: [{ price: 8000 + b.provinceId + (i === 0 ? priceBump : 0), sysPrice: 10000, isCanBuy: true }] })) } }));
+  }
+  return realFetch(url, o);
+};
+const realST = window.setTimeout; window.setTimeout = (f, ms, ...a) => realST(f, ms > 50 ? 0 : ms, ...a);   // bỏ thời gian chờ để test chạy nhanh
+</script>
+<script src="/web/gas-api.js"></script>
+<script src="/web/firebase-api.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById("out"); let pass = 0, fail = 0;
+  const check = (n, c, x) => { if (c) pass++; else fail++; out.textContent += `${c ? "[OK]  " : "[FAIL] "}${n}${c ? "" : " " + JSON.stringify(x)}\n`; };
+  const A = window.GasAPI, err = async (f) => { try { await f(); return ""; } catch (e) { return e.message; } };
+  check("bật chế độ Firebase khi có cờ", A.fb === true);
+  let me = await A.currentUser();
+  check("mở lại phiên: lấy được người dùng từ Apps Script, gửi token Firebase", me && me.role === "admin" && window.__gasToken === "eyJ.tok", me);
+  window.__authTime = Date.now() - 8 * 864e5;
+  me = await A.currentUser();
+  check("quá 7 ngày: đăng xuất, báo lý do", me === null && /7 ngày/.test(A.sessionNote), A.sessionNote);
+  window.__authTime = Date.now();
+  check("sai mật khẩu: báo chung", /không đúng/.test(await err(() => A.signIn("a@b.co", "sai"))));
+  check("chưa xác nhận email: gửi lại thư, không cho vào", /chưa được xác nhận/.test(await err(() => A.signIn("chuaxn@gmail.com", "dung"))) && window.__sent === true);
+  me = await A.signIn("admin@gmail.com", "dung");
+  check("đăng nhập đúng", me && me.email === "admin@gmail.com", me);
+  await A.fbForgot("x@y.co"); check("quên mật khẩu gửi thư", window.__reset === "x@y.co");
+  await A.listUsers(); check("chép danh sách quyền sang Firestore, email viết thường", store.get("users/viewer@gmail.com").role === "viewer");
+
+  await A.savePriceConfig([{ tinh: "Hà Nội", provinceId: "1", wardId: "2", storeId: "3" }, { tinh: "Cần Thơ", provinceId: "4", wardId: "5", storeId: "6" }]);
+  const cfg = await A.priceConfig();
+  check("lưu thiết lập tỉnh không giới hạn 10 tỉnh cũ, không đòi token", cfg.provinces.length === 2 && cfg.missing.length === 7, cfg);
+  check("mã không phải số → lỗi", /phải là số/.test(await err(() => A.savePriceConfig([{ tinh: "X", provinceId: "a", wardId: "1", storeId: "1" }]))));
+  const run = async () => { let j = await A.priceStart(), g = 0; while (j.status === "running" && g++ < 500) j = await A.priceStep(j.id); return j; };
+  writes = 0; bhxCalls = 0;
+  let j = await run();
+  check("lấy đủ 2 tỉnh, dùng 50 SKU mỗi trang", j.status === "done" && j.summary.provinces.length === 2 && j.summary.provinces[0].rows === 110 && sizesSeen.has(50) && sizesSeen.size === 1, j);
+  check("mỗi tỉnh chỉ tốn ít lượt ghi (tỉnh + lịch sử + meta + 8 nhóm SKU)", writes === 22, writes);
+  const d0 = new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
+  check("lưu theo tỉnh, không có mảng lồng", typeof store.get("price_cur/ha_noi").items === "string" && store.get("price_cur/can_tho").tinh === "Cần Thơ");
+  let p = await A.getPrices();
+  check("đọc lại đúng dạng báo cáo cần", p.items.length === 220 && p.skus.length === 110 && p.runs.length === 2 && p.items[0].final > 0 && p.items[0].promo === true && p.items[0].first_seen === d0, p.items[0]);
+  check("ngành, đơn vị, thương hiệu đúng", p.skus[0].cat === "Sữa" && p.skus[0].unit === "Gói" && p.skus[0].url.startsWith("https://www.bachhoaxanh.com/"));
+  let h = await A.getPriceHist("Hà Nội");
+  check("lịch sử chỉ của tỉnh được hỏi", h.length === 110 && h.every((r) => r[1] === "Hà Nội"), h.length);
+  priceBump = 500; j = await run();
+  check("cùng ngày chạy lại: phát hiện đổi giá", j.status === "done" && j.summary.provinces[0].up === 4, j.summary);
+  h = await A.getPriceHist("Hà Nội");
+  check("cùng ngày: gộp lịch sử, không nhân đôi", h.length === 110, h.length);
+  bhxMode = "few"; j = await run();
+  check("tỉnh ít SKU bất thường: chờ xác nhận, dữ liệu cũ giữ nguyên", j.status === "confirm" && JSON.parse(store.get("price_cur/ha_noi").items).length === 110, j);
+  j = await A.priceFinish(j.id);
+  check("Admin xác nhận thì lưu và chạy tiếp tỉnh sau", j.status === "running" && j.summary.provinces[0].rows === 3, j);
+  await A.priceCancel();
+  bhxMode = "403"; j = await run();
+  check("BHX chặn: tạm dừng, báo rõ, dữ liệu giữ nguyên", j.status === "paused" && /403/.test(j.msg), j);
+  bhxMode = "ok"; j = await A.priceStart();
+  check("bấm lại: chạy tiếp đúng lần cũ", j.status === "running", j);
+  await A.priceCancel();
+  bhxMode = "none"; j = await run();
+  check("BHX trả rỗng: không ghi đè dữ liệu", j.status === "paused" && /không trả SKU/.test(j.msg), j);
+  await A.priceCancel();
+  out.textContent += `\nKẾT QUẢ: ${fail ? "CÓ LỖI" : "TẤT CẢ ĐẠT"} (${pass}/${pass + fail})`;
+  document.title = fail ? "FAIL" : "PASS"; window.__result = { pass, fail };
+})().catch((e) => { document.getElementById("out").textContent += "LỖI CHẠY TEST: " + e.stack; window.__result = { error: String(e) }; });
+</script>
