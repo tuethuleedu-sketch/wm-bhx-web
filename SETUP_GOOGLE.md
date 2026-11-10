@@ -115,7 +115,7 @@ SYNC_SECRET=chuỗi-64-ký-tự
 - Bản đồ nền dùng tile OpenStreetMap (miễn phí, có chính sách sử dụng hợp lý); dùng nội bộ ít người thì ổn.
 - **Giá đối thủ:** chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Dữ liệu nằm ở các tab `price_*` của Sheet chính, giữ lâu dài, không có giá WM.
   Không cần token hay tài khoản: hệ thống gọi như khách chưa đăng nhập. Mã 3 tỉnh có sẵn, đổi được trong tab Giá đối thủ. Bấm **Thử kết nối** rồi **Cập nhật giá**. Các tab `price_*` tự tạo ở lần lưu đầu tiên, không cần chạy lại `setup`.
-- **Bot Hỏi Claude:** chỉ Admin dùng, tính phí theo lượng dùng ở tài khoản API của Anthropic. Tự thêm `CLAUDE_API_KEY` vào Script properties và đặt trần chi tiêu trong Claude Console. Bot chỉ gửi số tổng hợp giá đối thủ, không gửi tên SKU và dữ liệu WM. Đổi model ở `BOT_MODEL`, giới hạn lượt ở `BOT_DAILY` trong `Code.gs`; dán lại `Code.gs` thì các giá trị này về như trong file.
+- **Bot Hỏi Gemini:** chỉ Admin dùng. Tạo key tại aistudio.google.com rồi tự thêm `GEMINI_API_KEY` vào Script properties. Bản miễn phí có thể được Google dùng để cải thiện sản phẩm và có người đọc, nên bot chỉ gửi số tổng hợp giá đối thủ, không gửi tên SKU và dữ liệu WM. Đổi model ở `BOT_MODEL`, giới hạn lượt ở `BOT_DAILY` trong `Code.gs`; dán lại `Code.gs` thì các giá trị này về như trong file.
 
 ## Test có sẵn (cho người bảo trì)
 - `gas/test/run_tests.html`: test backend `Code.gs` trên môi trường Google giả lập (mật khẩu, quyền, upload, hết hạn 48h, đồng bộ BHX, thu hồi, nhật ký).
