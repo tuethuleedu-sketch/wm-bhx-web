@@ -14,13 +14,21 @@ window.__authTime = Date.now();
 const fakeAuth = { currentUser: fbUser, onAuthStateChanged(cb) { setTimeout(cb, 0); return () => {}; }, async signOut() { this.currentUser = null; },
   async signInWithEmailAndPassword(e, p) { if (p !== "dung") { throw Object.assign(new Error("x"), { code: "auth/invalid-credential" }); } this.currentUser = e === "chuaxn@gmail.com" ? { ...fbUser, emailVerified: false } : fbUser; return { user: this.currentUser }; },
   async createUserWithEmailAndPassword() { this.currentUser = fbUser; return { user: fbUser }; }, async sendPasswordResetEmail(e) { window.__reset = e; } };
+const Timestamp = { fromMillis: (ms) => ({ ms, toMillis: () => ms }) };
 window.firebase = { initializeApp() {}, auth: Object.assign(() => fakeAuth, { EmailAuthProvider: { credential: () => ({}) } }),
-  firestore: () => ({ collection: (c) => ({ doc: (id) => docRef(c, id), async get() { return { docs: [...store.entries()].filter(([k]) => k.startsWith(c + "/")).map(([k, v]) => ({ id: k.split("/")[1], data: () => v })) }; } }),
-    batch: () => { const ops = []; return { set: (r, v, o) => ops.push(() => r.set(v, o)), async commit() { writes += ops.length; for (const f of ops) await f(); } }; } }) };
+  firestore: Object.assign(() => ({ collection: (c) => ({ doc: (id) => docRef(c, id), async get() { return { docs: [...store.entries()].filter(([k]) => k.startsWith(c + "/")).map(([k, v]) => ({ id: k.split("/")[1], data: () => v })) }; } }),
+    batch: () => { const ops = []; return { set: (r, v, o) => ops.push(() => r.set(v, o)), delete: (r) => ops.push(() => r.delete()), async commit() { writes += ops.length; for (const f of ops) await f(); } }; } }), { Timestamp }) };
+// Dữ liệu giả của Apps Script cho bản đồ. bigBhx: đủ lớn để phải chia nhiều phần.
+let gasBoots = 0, wmExpMs = Date.now() + 40 * 36e5, bigBhx = false, meRole = "admin";
+const fakeSnap = () => ({ wm: [{ ma: "W1", ten: "WM 1", tinh: "Hà Nội", lat: 21, lng: 105.8, chuoi: "WM+" }], wmVersion: "v1 — 10/11/2026", wmExpires: wmExpMs ? new Date(wmExpMs).toISOString() : null,
+  bhx: Array.from({ length: bigBhx ? 9000 : 3 }, (_, i) => ({ ma: i, dia_chi: "Số " + i + " đường Nguyễn Văn Cừ, phường Bình Đông", tinh: "Hà Nội", lat: 21 + i / 1e5, lng: 105.8 })),
+  comp: [{ chain: "Co.op Food", ma: "C1", ten: "C1", dia_chi: "x", tinh: "Hà Nội", lat: 21.01, lng: 105.81 }], compUpdated: "2026-11-11 06:10", compStatus: "{}", bhxUpdated: "2026-11-11 06:05" });
 let bhxMode = "ok", priceBump = 0, bhxCalls = 0, sizesSeen = new Set();
 const realFetch = window.fetch;
 window.fetch = async (url, o) => {
-  if (url === "http://gas.test/exec") { const b = JSON.parse(o.body); window.__gasToken = b.token; if (b.action === "boot") return new Response(JSON.stringify({ data: { me: { email: "admin@gmail.com", role: "admin" }, settings: {}, snapshot: {}, changes: [] } })); if (b.action === "listUsers") return new Response(JSON.stringify({ data: [{ email: "Viewer@gmail.com", role: "viewer" }] })); return new Response(JSON.stringify({ data: true })); }
+  if (url === "http://gas.test/exec") { const b = JSON.parse(o.body); window.__gasToken = b.token; if (b.action === "boot") { gasBoots++; return new Response(JSON.stringify({ data: { me: { email: "admin@gmail.com", role: meRole }, settings: { viewer_can_export: false }, snapshot: fakeSnap(), changes: [{ date: "2026-11-10", chain: "BHX", type: "open", ma: "9", dia_chi: "y", tinh: "Hà Nội", lat: 21, lng: 105.8 }] } })); }
+    if (b.action === "me") return new Response(JSON.stringify({ data: { email: "admin@gmail.com", role: meRole } }));
+    if (b.action === "publishWm") return new Response(JSON.stringify({ data: { version: "v2", rows: b.rows.length, added: 0, removed: 0, moved: 0 } })); if (b.action === "listUsers") return new Response(JSON.stringify({ data: [{ email: "Viewer@gmail.com", role: "viewer" }] })); return new Response(JSON.stringify({ data: true })); }
   if (/AjaxProduct/.test(url)) {
     bhxCalls++; const b = JSON.parse(o.body); sizesSeen.add(b.PageSize);
     if (bhxMode === "403") return new Response("{}", { status: 403 });
@@ -54,6 +62,40 @@ const realST = window.setTimeout; window.setTimeout = (f, ms, ...a) => realST(f,
   check("đăng nhập đúng", me && me.email === "admin@gmail.com", me);
   await A.fbForgot("x@y.co"); check("quên mật khẩu gửi thư", window.__reset === "x@y.co");
   await A.listUsers(); check("chép danh sách quyền sang Firestore, email viết thường", store.get("users/viewer@gmail.com").role === "viewer");
+  check("quyền đã gỡ ở Apps Script thì gỡ luôn ở Firestore", !store.get("users/admin@gmail.com"));
+
+  // ---- Bản sao bản đồ (WM+, cửa hàng đối thủ, biến động) ----
+  const wait = (ms) => new Promise((r) => realST(r, ms));
+  const keys = (p) => [...store.keys()].filter((k) => k.startsWith(p));
+  gasBoots = 0;
+  let bt = await A.getBoot();
+  check("lần đầu chưa có bản sao: lấy từ Apps Script rồi ghi bản sao", gasBoots === 1 && bt.snapshot.bhx.length === 3 && !!store.get("cache/meta"), gasBoots);
+  bt = await A.getBoot();
+  check("lần sau đọc bản sao, không gọi Apps Script", gasBoots === 1 && bt.snapshot.wm.length === 1 && bt.snapshot.comp.length === 1 && bt.changes.length === 1 && bt.settings.viewer_can_export === false && bt.snapshot.wmExpires instanceof Date && bt.snapshot.bhxUpdated === "2026-11-11 06:05", { gasBoots, s: bt.snapshot });
+  store.set("cache/meta", { ...store.get("cache/meta"), wmExpires: Date.now() - 1000 });
+  bt = await A.getBoot(); await wait(50);
+  check("WM+ quá 48 giờ: không hiện, bản sao WM+ bị xoá", bt.snapshot.wm.length === 0 && bt.snapshot.wmVersion === "chưa có" && bt.snapshot.wmExpires === null && keys("cache_wm/").length === 0 && store.get("cache/meta").wmParts === 0, keys("cache_wm/"));
+  const r2 = await A.publishWm([{ ma: " W2 ", ten: "", tinh: "HN", lat: "21.1", lng: "105.9" }]);
+  bt = await A.getBoot();
+  check("upload WM+: bản sao có ngay WM+ mới, hạn 48 giờ", r2.version === "v2" && bt.snapshot.wm.length === 1 && bt.snapshot.wm[0].ma === "W2" && bt.snapshot.wm[0].ten === "W2" && bt.snapshot.wm[0].lat === 21.1 && Math.abs(bt.snapshot.wmExpires - Date.now() - 48 * 36e5) < 6e4 && /^v2 — \d\d\/\d\d\/\d{4}$/.test(bt.snapshot.wmVersion), bt.snapshot);
+  check("WM+ trong bản sao có hạn xoá (expireAt)", keys("cache_wm/").length === 1 && keys("cache_wm/").every((k) => store.get(k).expireAt.ms > Date.now()));
+  await A.setSetting("viewer_can_export", true);
+  check("đổi cài đặt: bản sao đổi theo", (await A.getBoot()).settings.viewer_can_export === true);
+  bigBhx = true; store.set("cache/meta", { ...store.get("cache/meta"), syncedAt: Date.now() - 2 * 36e5 });
+  gasBoots = 0; bt = await A.getBoot();
+  for (let i = 0; i < 100 && store.get("cache/meta").syncedAt < Date.now() - 36e5; i++) await wait(10);
+  await wait(50);
+  const m2 = store.get("cache/meta");
+  check("quá 1 giờ: Admin vẫn mở ngay bằng bản sao, làm mới ở nền", bt.snapshot.bhx.length === 3 && gasBoots === 1 && m2.parts.bhx >= 2, m2.parts);
+  check("làm mới xong không còn phần cũ", keys("cache/").filter((k) => k !== "cache/meta").every((k) => k.startsWith("cache/" + m2.gen + "_")) && keys("cache_wm/").every((k) => k.startsWith("cache_wm/" + m2.wmGen + "_")), keys("cache"));
+  bt = await A.getBoot();
+  check("dữ liệu lớn chia nhiều phần vẫn đọc đủ", bt.snapshot.bhx.length === 9000 && keys("cache/").every((k) => !store.get(k).d || store.get(k).d.length < 1e6), bt.snapshot.bhx.length);
+  meRole = "viewer"; store.set("users/admin@gmail.com", { role: "viewer" }); await A.currentUser();
+  store.set("cache/meta", { ...store.get("cache/meta"), syncedAt: Date.now() - 31 * 36e5 });
+  gasBoots = 0; const metaBefore = JSON.stringify(store.get("cache/meta"));
+  bt = await A.getBoot(); await wait(50);
+  check("Viewer, bản sao quá 30 giờ: lấy từ Apps Script, không ghi bản sao", gasBoots === 1 && bt.snapshot.bhx.length === 9000 && JSON.stringify(store.get("cache/meta")) === metaBefore, gasBoots);
+  meRole = "admin"; bigBhx = false; store.set("users/admin@gmail.com", { role: "admin" }); await A.currentUser();
 
   await A.savePriceConfig([{ tinh: "Hà Nội", provinceId: "1", wardId: "2", storeId: "3" }, { tinh: "Cần Thơ", provinceId: "4", wardId: "5", storeId: "6" }]);
   const cfg = await A.priceConfig();
