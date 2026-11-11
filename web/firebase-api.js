@@ -248,7 +248,12 @@
   const metaRef = () => db.collection("price").doc("meta");
   async function readMeta() { const d = await metaRef().get(); return d.exists ? d.data() : {}; }
   const metaRuns = (m) => (m.runs ? JSON.parse(m.runs) : []);
-  const metaProvinces = (m) => (m.provinces ? JSON.parse(m.provinces) : DEFAULT);
+  // Mỗi tỉnh tối đa 2 cửa hàng: Thành thị và Nông thôn. Giá lưu theo "nơi lấy giá": Thành thị giữ tên tỉnh (khớp dữ liệu cũ), Nông thôn thêm " · Nông thôn".
+  const URBAN = "Thành thị", RURAL = "Nông thôn";
+  // Chuỗi khác BHX: tên nơi lấy giá có mã chuỗi ở đầu, ví dụ "LOTTE: Hồ Chí Minh".
+  const chainOf = (p) => (p.chain === "LOTTE" || p.chain === "KFM" ? p.chain : "BHX");
+  const locName = (p) => (chainOf(p) === "BHX" ? "" : chainOf(p) + ": ") + (p.khu === RURAL ? `${p.tinh} · ${RURAL}` : p.tinh);
+  const metaProvinces = (m) => (m.provinces ? JSON.parse(m.provinces) : DEFAULT).map((p) => ({ ...p, khu: p.khu === RURAL ? RURAL : URBAN }));
   async function readCur(tinh) { const d = await db.collection("price_cur").doc(slug(tinh)).get(); return d.exists ? d.data() : null; }
   async function readShards() {
     const docs = await Promise.all(Array.from({ length: SHARDS }, (_, k) => db.collection("price_skus").doc("s" + k).get()));
@@ -259,7 +264,7 @@
   const fromRow = (r, first, date) => [r.id, r.final, r.base, Math.round(r.off * 10000) / 10000, r.promo ? 1 : 0, r.title, r.can === false ? 0 : 1, first, date];
 
   // Cùng quy tắc với Apps Script: chỉ thêm lịch sử khi SKU mới hoặc đổi giá; tải lại trong ngày thì gộp vào ngày đó.
-  async function saveProvince(tinh, store, rows, date, file, force, skus) {
+  async function saveProvince(tinh, store, rows, date, file, force, skus, addr) {
     const key = slug(tinh), cur = await readCur(tinh), old = cur ? JSON.parse(cur.items) : [];
     const last = old.reduce((m, a) => (a[8] > m ? a[8] : m), "");
     if (last > date) throw new Error(`${tinh} đã có giá ngày ${last}, mới hơn ngày ${date}.`);
@@ -279,11 +284,11 @@
       if (!o || o[1] !== r.final || o[2] !== r.base) hist.push([r.id, r.final, r.base]);
       items.push(fromRow(r, o ? o[7] : date, date));
       const shard = skus[shardOf(r.id)];
-      shard[r.id] = [r.code, r.name, r.cat, r.brand, r.unit, r.url];
+      shard[r.id] = [r.code, r.name, r.cat, r.brand, r.unit, r.url, r.grp || ""];
     });
     const histRef = db.collection("price_hist").doc(`${key}_${date}`), histOld = await histRef.get();
     if (histOld.exists) { const add = new Set(hist.map((h) => h[0])); JSON.parse(histOld.data().rows).forEach((h) => { if (!add.has(h[0])) hist.push(h); }); }
-    const m = await readMeta(), runs = metaRuns(m).concat([{ date, at: new Date().toISOString(), tinh, store, file, by: auth.currentUser.email, n: rows.length, added: s.added, gone: s.gone, up: s.up, down: s.down }]).slice(-1500);
+    const m = await readMeta(), runs = metaRuns(m).concat([{ date, at: new Date().toISOString(), tinh, store, ...(addr ? { addr: String(addr).slice(0, 200) } : {}), file, by: auth.currentUser.email, n: rows.length, oos: rows.filter((r) => r.can === false).length, added: s.added, gone: s.gone, up: s.up, down: s.down }]).slice(-1500);
     const batch = db.batch();
     batch.set(db.collection("price_cur").doc(key), { tinh, store, latest: date, items: pack(items), dates: JSON.stringify(dates.concat(date).slice(-60)) });
     batch.set(histRef, { tinh, date, rows: pack(hist) });
@@ -321,15 +326,78 @@
   }
 
   // Tiến độ theo tỉnh lưu ở trình duyệt: đóng tab thì chạy tiếp từ tỉnh đang dở.
+  // ---------- Nguồn giá theo chuỗi ----------
+  // LOTTE: trình duyệt gọi thẳng web LOTTE (web cho phép). Mỗi ngành lớn 1 lần gọi, tối đa 1.000 SKU một trang. Giá theo từng siêu thị.
+  const LOTTE_API = "https://www.lottemart.vn/v1/p/mart/es/vi_", LOTTE_SIZE = 1000;
+  // Ngành lớn của LOTTE có bán ở BHX/WM (bỏ điện gia dụng, thú cưng, thời trang, thể thao).
+  const LOTTE_CATS = [3, 266, 495, 285, 303, 167, 506, 200, 186, 161, 143, 231, 111, 140, 226, 122, 261, 314, 516, 325, 351, 369];
+  const CHAIN_NAME = { BHX: "BHX", LOTTE: "LOTTE", KFM: "Kingfoodmart" };
+  async function lottePage(store, cat, page) {
+    let last = "";
+    for (let a = 0; a < RETRY; a++) {
+      if (a) await sleep(2000 * a);
+      let r;
+      try { r = await fetch(`${LOTTE_API}${store}/categories/${cat}/products`, { method: "POST", credentials: "omit", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ page_number: page, page_size: LOTTE_SIZE }) }); }
+      catch (_) { last = "không kết nối được LOTTE"; continue; }
+      if (r.status === 403 || r.status === 429) throw new Error(`LOTTE từ chối (${r.status}). Đợi một lúc rồi bấm Tiếp tục.`);
+      if (r.status !== 200) { last = "HTTP " + r.status; continue; }
+      try { const d = await r.json(); return (d.data && d.data.items) || []; } catch (_) { last = "phản hồi không đọc được"; }
+    }
+    throw new Error(`Ngành ${cat} của LOTTE ${store} lỗi: ${last}`);
+  }
+  function lotteRow(it) {
+    const num = (v) => { const x = Number(v); return isFinite(x) ? x : 0; }, V = (it.price && it.price.VND) || {};
+    const regular = num(V.default), price = num(V.price) || regular, special = num(V.special_price), orig = num(V.default_original);
+    const final = special > 0 && special < price ? special : price, base = Math.max(orig, regular, final);
+    const path = (it.category_full_path || []).filter((s) => !/^virtual/i.test(s)).sort((a, b) => b.split(" / ").length - a.split(" / ").length)[0] || "";
+    const parts = path.split(" / "), grp = parts[1] || parts[0] || "", title = String(V.default_discount_label || "").trim().slice(0, 200);
+    const off = base > 0 && final > 0 && base > final ? 1 - final / base : 0;
+    return { id: "LOTTE:" + it.id, code: String(it.sku || ""), name: String(it.name || "").slice(0, 300), grp, cat: parts[2] || grp, brand: "", unit: "", url: /^https:\/\/www\.lottemart\.vn\//.test(it.url || "") ? it.url : "",
+      final, base, off, promo: off > 0 || title !== "", title, can: String(it.in_stock) === "1" && num(it.stock_qty) > 0 };
+  }
+  // LOTTE trả tối đa 1.000 SKU cho mỗi ngành và không cho chọn trang tiếp theo, nên lấy theo ngành sâu nhất của các ngành lớn trên.
+  const lotteTree = new Map(), lotteKids = new Map();
+  async function lotteLeaves(store) {
+    if (lotteTree.has(store)) return lotteTree.get(store);
+    let d = null;
+    try { const r = await fetch(`${LOTTE_API}${store}/categories/tree/filter?level=3`, { credentials: "omit" }); if (r.ok) d = await r.json(); } catch (_) {}
+    if (!d || !Array.isArray(d.data)) throw new Error(`Không đọc được danh mục của LOTTE ${store}.`);
+    const want = new Set(LOTTE_CATS.map(String)), out = [];
+    // Lấy theo ngành con (cấp 4); ngành con nào chạm 1.000 SKU thì mới đi sâu thêm (xem SRC.LOTTE), để đỡ số lần gọi.
+    const kids = lotteKids.get(store) || new Map(); lotteKids.set(store, kids);
+    const note = (c) => { const ch = Array.isArray(c.child) ? c.child : []; kids.set(Number(c.id), ch.map((k) => Number(k.id)).filter(Boolean)); ch.forEach(note); };
+    d.data.forEach((c) => { if (!want.has(String(c.id))) return; note(c); const ch = kids.get(Number(c.id)); out.push(...(ch.length ? ch : [Number(c.id)])); });
+    if (!out.length) throw new Error(`Danh mục LOTTE ${store} không có ngành nào cần lấy.`);
+    lotteTree.set(store, out);
+    return out;
+  }
+  // Kingfoodmart: web không cho trình duyệt ở trang khác gọi thẳng, nên Apps Script lấy hộ từng trang (không ghi gì vào Sheet).
+  let kfmCats = null;
+  async function catsFor(p) {
+    const c = chainOf(p);
+    if (c === "LOTTE") return lotteLeaves(p.storeId);
+    if (c === "KFM") { if (!kfmCats) kfmCats = (await gas.kfmPricePage("", 1)).cats.map((x) => x.slug); return kfmCats; }
+    return CATS;
+  }
+  const catsLen = (p) => (chainOf(p) === "LOTTE" ? (lotteTree.get(p.storeId) || { length: 90 }).length : chainOf(p) === "KFM" ? (kfmCats ? kfmCats.length : 15) : CATS.length);
+  const SRC = {
+    BHX: { page: async (p, cat, page) => { const l = await bhxPage(p, cat, page); return { rows: l.map((x) => rowOf(x, p)), more: l.length === PAGE }; } },
+    LOTTE: { page: async (p, cat, page) => {
+      const l = await lottePage(p.storeId, cat, page), deeper = l.length >= LOTTE_SIZE ? ((lotteKids.get(p.storeId) || new Map()).get(Number(cat)) || []) : [];
+      return { rows: l.map(lotteRow), more: false, expand: deeper };   // chạm 1.000 SKU: lấy thêm các ngành con của ngành này
+    } },
+    KFM: { page: async (p, slug, page) => { const d = await gas.kfmPricePage(slug, page + 1); return { rows: d.items, more: d.page < d.last }; } },
+  };
+
   let job = null, buf = null, shards = null;
   const saveJob = () => { try { const { summary, ...j } = job; localStorage.setItem(JOB, JSON.stringify({ ...j, summary })); } catch (_) {} };
   const loadJob = () => { try { return JSON.parse(localStorage.getItem(JOB) || "null"); } catch (_) { return null; } };
-  const out = (j) => (j ? { id: j.id, status: j.status, date: j.date, msg: j.msg || "", tinh: j.provinces[j.pi] ? j.provinces[j.pi].tinh : "", done: Math.min(j.pi * CATS.length + j.ci, j.provinces.length * CATS.length), total: j.provinces.length * CATS.length, rows: j.rows, summary: j.summary || null } : null);
+  const out = (j) => (j ? { id: j.id, status: j.status, date: j.date, msg: j.msg || "", tinh: j.provinces[j.pi] ? locName(j.provinces[j.pi]) : "", count: j.provinces.length, done: j.provinces.slice(0, j.pi).reduce((a, p) => a + catsLen(p), 0) + j.ci, total: j.provinces.reduce((a, p) => a + catsLen(p), 0), rows: j.rows, summary: j.summary || null } : null);
   async function saveCurrent(force) {
     const p = job.provinces[job.pi];
     try {
       if (!shards) shards = await readShards();
-      const s = await saveProvince(p.tinh, p.storeId, buf.rows, job.date, "Cập nhật trực tiếp", force, shards);
+      const s = await saveProvince(locName(p), p.storeId, buf.rows, job.date, "Cập nhật trực tiếp", force, shards, p.addr);
       job.summary.provinces.push(s); job.rows += s.rows; job.pi++; job.ci = 0; job.page = 0; buf = null; job.msg = "";
       job.status = job.pi >= job.provinces.length ? "done" : "running";
     } catch (e) {
@@ -344,9 +412,53 @@
       await ready();
       const [m, curSnap, skus] = await Promise.all([readMeta(), db.collection("price_cur").get(), readShards()]);
       const skuList = [], items = [];
-      Object.values(skus).forEach((sh) => Object.entries(sh).forEach(([id, a]) => skuList.push({ id, code: a[0], name: a[1], cat: a[2], brand: a[3], unit: a[4], url: a[5] })));
+      Object.values(skus).forEach((sh) => Object.entries(sh).forEach(([id, a]) => skuList.push({ id, code: a[0], name: a[1], cat: a[2], brand: a[3], unit: a[4], url: a[5], grp: a[6] || "" })));
       curSnap.docs.forEach((d) => { const c = d.data(); JSON.parse(c.items).forEach((a) => items.push({ ...toItem(a), tinh: c.tinh, store: c.store })); });
-      return { skus: skuList, items, runs: metaRuns(m), hist: [] };
+      return { skus: skuList, items, runs: metaRuns(m), hist: [], regions: m.regions ? JSON.parse(m.regions) : null };
+    },
+    // Chép lịch sử giá đã lưu ở bản Apps Script (Google Sheet) sang Firestore. Chạy lại nhiều lần cũng không nhân đôi:
+    // ngày nào Firestore đã có thì giữ bản Firestore, SKU đã có thì chỉ lùi ngày xuất hiện đầu tiên, lần tải trùng thì bỏ.
+    async importGasPrices() {
+      await ready();
+      const g = await gas.getPrices();
+      if (!g.items.length && !g.hist.length) return { provinces: [], dates: 0 };
+      const skus = await readShards(), m = await readMeta(), out = [];
+      g.skus.forEach((s) => { const sh = skus[shardOf(s.id)]; if (!sh[s.id]) sh[s.id] = [s.code, s.name, s.cat, s.brand, s.unit, s.url]; });
+      const tinhs = [...new Set(g.items.map((x) => x.tinh).concat(g.hist.map((h) => h[1])))].filter(Boolean);
+      for (const tinh of tinhs) {
+        const key = slug(tinh), cur = await readCur(tinh);
+        const fsDates = cur && cur.dates ? JSON.parse(cur.dates) : [], byId = new Map((cur ? JSON.parse(cur.items) : []).map((a) => [a[0], a]));
+        const gi = g.items.filter((x) => x.tinh === tinh);
+        gi.forEach((x) => { const a = byId.get(x.id); if (!a) byId.set(x.id, fromRow(x, x.first_seen, x.last_seen)); else if (x.first_seen && x.first_seen < a[7]) a[7] = x.first_seen; });
+        const byDate = new Map();
+        g.hist.filter((h) => h[1] === tinh).forEach((h) => { if (!byDate.has(h[0])) byDate.set(h[0], []); byDate.get(h[0]).push([h[2], h[3], h[4]]); });
+        let added = 0;
+        for (const [d, rows] of byDate) {
+          if (fsDates.includes(d)) continue;                                   // ngày Firestore đã có thì giữ nguyên
+          await db.collection("price_hist").doc(`${key}_${d}`).set({ tinh, date: d, rows: pack(rows) });
+          added++;
+        }
+        const runDates = g.runs.filter((r) => r.tinh === tinh).map((r) => r.date);
+        const dates = [...new Set(fsDates.concat([...byDate.keys()], runDates))].sort().slice(-60);
+        const latest = cur ? cur.latest : dates[dates.length - 1];
+        const store = cur ? cur.store : (gi[gi.length - 1] || {}).store || "";
+        await db.collection("price_cur").doc(key).set({ tinh, store, latest, items: pack([...byId.values()]), dates: JSON.stringify(dates) });
+        out.push({ tinh, dates: added, skus: gi.length });
+      }
+      const seen = new Set(metaRuns(m).map((r) => r.date + "|" + r.tinh + "|" + r.at));
+      const runs = g.runs.filter((r) => !seen.has(r.date + "|" + r.tinh + "|" + r.at)).concat(metaRuns(m)).sort((a, b) => (a.date + a.at < b.date + b.at ? -1 : 1)).slice(-1500);
+      const batch = db.batch();
+      Object.keys(skus).forEach((k) => batch.set(db.collection("price_skus").doc(k), { json: pack(skus[k]) }));
+      batch.set(metaRef(), { runs: pack(runs), imported: new Date().toISOString() }, { merge: true });
+      await batch.commit();
+      return { provinces: out, dates: out.reduce((a, p) => a + p.dates, 0) };
+    },
+    // Bảng tỉnh → miền/vùng lấy từ file WM+ (không chứa dữ liệu WM nào khác).
+    async savePriceRegions(reg) {
+      await ready();
+      const clean = {};
+      Object.entries(reg || {}).slice(0, 200).forEach(([k, v]) => { if (/^[a-z0-9]{1,60}$/.test(k)) clean[k] = { mien: String(v.mien || "").slice(0, 60), vung: String(v.vung || "").slice(0, 60) }; });
+      await metaRef().set({ regions: JSON.stringify(clean) }, { merge: true });
     },
     // Lịch sử chỉ tải cho tỉnh đang xem để trang nhẹ và ít lượt đọc.
     async getPriceHist(tinh) {
@@ -374,9 +486,11 @@
       await ready();
       if (job && job.status !== "done") throw new Error("Đang có lần cập nhật dở dang. Huỷ lần đó trước khi đổi thiết lập.");
       const seen = new Set(), clean = list.map((p) => {
-        const o = { tinh: String(p.tinh || "").trim().slice(0, 60), provinceId: String(p.provinceId || "").trim(), wardId: String(p.wardId || "").trim(), storeId: String(p.storeId || "").trim() };
-        if (!o.tinh) throw new Error("Thiếu tên tỉnh"); if (seen.has(o.tinh)) throw new Error("Trùng tỉnh: " + o.tinh); seen.add(o.tinh);
-        ["provinceId", "wardId", "storeId"].forEach((k) => { if (!/^\d{1,12}$/.test(o[k])) throw new Error(`${o.tinh}: ${k} phải là số`); });
+        const o = { chain: chainOf(p), tinh: String(p.tinh || "").trim().slice(0, 60), khu: p.khu === RURAL ? RURAL : URBAN, provinceId: String(p.provinceId || "").trim(), wardId: String(p.wardId || "").trim(), storeId: String(p.storeId || "").trim(), addr: String(p.addr || "").trim().slice(0, 200) };
+        if (!o.tinh) throw new Error("Thiếu tên tỉnh"); if (seen.has(locName(o))) throw new Error("Trùng tỉnh và khu vực: " + locName(o)); seen.add(locName(o));
+        if (o.chain === "BHX") ["provinceId", "wardId", "storeId"].forEach((k) => { if (!/^\d{1,12}$/.test(o[k])) throw new Error(`${locName(o)}: ${k} phải là số`); });
+        else if (o.chain === "LOTTE" && !/^[a-z]{2,6}$/.test(o.storeId)) throw new Error(`${locName(o)}: mã siêu thị LOTTE là 2–6 chữ thường, ví dụ nsg`);
+        else if (o.chain === "KFM") o.storeId = "online";
         return o;
       });
       await metaRef().set({ provinces: pack(clean) }, { merge: true });
@@ -388,13 +502,15 @@
       for (const p of list) {
         try {
           let rows = [];
-          for (let c = 0; c < 5 && !rows.length; c++) { rows = (await bhxPage(p, CATS[c], 0)).map((x) => rowOf(x, p)); await sleep(DELAY); }
-          res.push(rows.length ? { tinh: p.tinh, ok: rows.some((r) => r.final > 0), sku: rows.length, withPrice: rows.filter((r) => r.final > 0).length, withCat: rows.filter((r) => r.cat).length, withBrand: rows.filter((r) => r.brand).length } : { tinh: p.tinh, ok: false, msg: "BHX không trả SKU nào ở 5 ngành đầu" });
-        } catch (e) { res.push({ tinh: p.tinh, ok: false, msg: e.message }); }
+          const cats = await catsFor(p);
+          for (let c = 0; c < Math.min(5, cats.length) && !rows.length; c++) { rows = (await SRC[chainOf(p)].page(p, cats[c], 0)).rows; await sleep(DELAY); }
+          res.push(rows.length ? { tinh: locName(p), ok: rows.some((r) => r.final > 0), sku: rows.length, withPrice: rows.filter((r) => r.final > 0).length, withCat: rows.filter((r) => r.cat).length, withBrand: rows.filter((r) => r.brand).length } : { tinh: locName(p), ok: false, msg: "Không có SKU nào ở 5 ngành đầu" });
+        } catch (e) { res.push({ tinh: locName(p), ok: false, msg: e.message }); }
       }
       return res;
     },
-    async priceStart() {
+    // scope: "all" (mặc định), "urban" chỉ Thành thị, "rural" chỉ Nông thôn.
+    async priceStart(scope) {
       await ready();
       if (!job) job = loadJob();
       if (job && job.status !== "done" && job.date === today()) {
@@ -402,28 +518,35 @@
         job.msg = ""; saveJob(); return out(job);
       }
       buf = null; shards = null;
-      job = { id: String(Date.now()), status: "running", date: today(), provinces: metaProvinces(await readMeta()), pi: 0, ci: 0, page: 0, rows: 0, msg: "", summary: { date: today(), provinces: [] } };
+      // urban/rural: chỉ cửa hàng BHX thành thị/nông thôn; BHX, LOTTE, KFM: chỉ chuỗi đó; all: tất cả.
+      const all = metaProvinces(await readMeta()), list = all.filter((p) => scope === "urban" ? chainOf(p) === "BHX" && p.khu !== RURAL : scope === "rural" ? chainOf(p) === "BHX" && p.khu === RURAL : ["BHX", "LOTTE", "KFM"].includes(scope) ? chainOf(p) === scope : true);
+      if (!list.length) throw new Error(scope === "rural" ? "Chưa có cửa hàng Nông thôn nào trong thiết lập. Bấm Lấy đủ các tỉnh có BHX rồi Lưu thiết lập." : ["LOTTE", "KFM"].includes(scope) ? "Chưa có cửa hàng của chuỗi này trong thiết lập. Bấm Thêm LOTTE và Kingfoodmart rồi Lưu thiết lập." : "Chưa có tỉnh nào trong thiết lập.");
+      kfmCats = null;
+      job = { id: String(Date.now()), status: "running", date: today(), scope: scope || "all", provinces: list, pi: 0, ci: 0, page: 0, rows: 0, msg: "", summary: { date: today(), provinces: [] } };
       saveJob();
       return out(job);
     },
     async priceStep(id) {
       if (!job || job.id !== id) throw new Error("Lần cập nhật này không còn. Bấm Cập nhật để bắt đầu lại.");
       if (job.status !== "running") return out(job);
-      const t0 = Date.now(), p = job.provinces[job.pi];
+      const t0 = Date.now(), p = job.provinces[job.pi], src = SRC[chainOf(p)];
       if (!buf) { buf = { rows: [], seen: new Set() }; job.ci = 0; job.page = 0; }           // tải lại trang thì lấy lại từ đầu tỉnh đang dở
+      let cats;
       try {
-        while (Date.now() - t0 < STEP_MS && job.ci < CATS.length) {
-          const list = await bhxPage(p, CATS[job.ci], job.page);
-          const fresh = list.map((x) => rowOf(x, p)).filter((r) => r.id && r.name && !buf.seen.has(r.id) && buf.seen.add(r.id));
+        cats = await catsFor(p);
+        while (Date.now() - t0 < STEP_MS && job.ci < cats.length) {
+          const r = await src.page(p, cats[job.ci], job.page);
+          const fresh = r.rows.filter((x) => x.id && x.name && !buf.seen.has(x.id) && buf.seen.add(x.id));
           buf.rows.push(...fresh);
-          if (list.length === PAGE && fresh.length) job.page++; else { job.page = 0; job.ci++; }
+          if (r.expand && r.expand.length) cats.splice(job.ci + 1, 0, ...r.expand.filter((c) => !cats.includes(c)));
+          if (r.more && fresh.length) job.page++; else { job.page = 0; job.ci++; }
           await sleep(DELAY);
         }
       } catch (e) {
-        job.status = "paused"; job.msg = e.message + " Các tỉnh đã lưu vẫn giữ nguyên."; saveJob(); return out(job);
+        job.status = "paused"; job.msg = e.message + " Các nơi đã lưu vẫn giữ nguyên."; saveJob(); return out(job);
       }
-      if (job.ci >= CATS.length) {
-        if (!buf.rows.length) { job.status = "paused"; job.msg = `BHX không trả SKU nào cho ${p.tinh}. Kiểm tra lại mã tỉnh, phường, cửa hàng.`; saveJob(); return out(job); }
+      if (job.ci >= cats.length) {
+        if (!buf.rows.length) { job.status = "paused"; job.msg = `${CHAIN_NAME[chainOf(p)]} không trả SKU nào cho ${p.tinh}. Kiểm tra lại mã cửa hàng.`; saveJob(); return out(job); }
         await saveCurrent(false);
       }
       return out(job);
@@ -433,6 +556,8 @@
       await saveCurrent(true);
       return out(job);
     },
+    // Tự lập danh sách ở Apps Script (BHX chỉ cho máy chủ Google lấy danh sách cửa hàng), giữ các cửa hàng đã thiết lập.
+    async priceAutoStores() { await ready(); return gas.priceAutoStores(metaProvinces(await readMeta())); },
     async priceCancel() { job = null; buf = null; try { localStorage.removeItem(JOB); } catch (_) {} return G.priceConfig(); },
   });
 })();

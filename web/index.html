@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow, noarchive, noai, noimageai">
   <!-- GitHub Pages không cho đặt header → CSP qua thẻ meta. Chỉ cho tải script từ chính trang + 2 CDN, chỉ gọi API Apps Script. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.sheetjs.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src https://script.google.com https://script.googleusercontent.com https://nominatim.openstreetmap.org https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.bachhoaxanh.com; base-uri 'none'; form-action 'self'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.sheetjs.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src https://script.google.com https://script.googleusercontent.com https://nominatim.openstreetmap.org https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.bachhoaxanh.com https://www.lottemart.vn; base-uri 'none'; form-action 'self'; object-src 'none'">
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611111105">
+  <link rel="stylesheet" href="style.css?v=202611111658">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -173,21 +173,26 @@
         </tr></thead><tbody></tbody></table></div></div>
       </div>
 
-      <!-- Bot Gemini: chỉ Admin -->
+      <!-- Bot AI (Gemini hoặc Claude, theo key đã dán): chỉ Admin -->
       <div id="bot" data-admin>
-        <button id="bot-open">Hỏi Gemini</button>
+        <button id="bot-open">Hỏi AI</button>
         <aside id="bot-panel" class="card" hidden>
-          <div class="card-head"><h3>Hỏi Gemini về giá đối thủ</h3><button class="link" id="bot-close" title="Đóng">✕</button></div>
+          <div class="card-head"><h3 id="bot-title">Hỏi AI về giá đối thủ</h3><button class="link" id="bot-close" title="Đóng">✕</button></div>
           <p class="muted small" id="bot-status"></p>
-          <details id="bot-key-box" class="small"><summary id="bot-key-title">Dán key Gemini</summary>
-            <p class="muted p-note">Tạo key tại aistudio.google.com rồi dán vào đây. Key được lưu trong Apps Script và không hiện lại.</p>
+          <details id="bot-key-box" class="small"><summary id="bot-key-title">Dán key AI</summary>
+            <p class="muted p-note">Dán key Gemini (tạo tại aistudio.google.com) hoặc key Claude (tạo tại console.anthropic.com, bắt đầu bằng sk-ant-). Dán key hãng nào thì bot dùng hãng đó; key mới thay key cũ. Key được lưu trong Apps Script và không hiện lại.</p>
             <div class="p-actions"><input id="bot-key" type="password" maxlength="200" autocomplete="off" spellcheck="false" placeholder="Dán key vào đây"><button id="bot-key-save">Lưu</button></div>
             <span class="small" id="bot-key-msg"></span>
+          </details>
+          <details id="bot-model-box" class="small" hidden><summary id="bot-model-title">Model</summary>
+            <p class="muted p-note" id="bot-model-note"></p>
+            <div class="p-actions"><input id="bot-model" list="bot-models" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Chọn hoặc gõ tên model"><datalist id="bot-models"></datalist><button id="bot-model-save">Dùng model này</button></div>
+            <span class="small" id="bot-model-msg"></span>
           </details>
           <div id="bot-log"></div>
           <div id="bot-quick"></div>
           <textarea id="bot-q" rows="2" maxlength="1000" placeholder="Hỏi về giá, khuyến mãi, ngành hàng, các tỉnh…"></textarea>
-          <label class="inline small"><input id="bot-agree" type="checkbox"> Đồng ý gửi câu hỏi và số tổng hợp bên dưới cho Gemini (Google). Bản miễn phí có thể được Google dùng để cải thiện sản phẩm</label>
+          <label class="inline small"><input id="bot-agree" type="checkbox"> Đồng ý gửi câu hỏi và số tổng hợp bên dưới cho <span id="bot-who">Gemini (Google). Bản miễn phí có thể được Google dùng để cải thiện sản phẩm</span></label>
           <details id="bot-preview" class="small"><summary>Xem số liệu sẽ gửi (theo bộ lọc ở tab Giá đối thủ)</summary><pre id="bot-data"></pre></details>
           <div class="p-actions"><button id="bot-send">Gửi</button><span class="small err" id="bot-msg"></span></div>
           <p class="muted small p-note">Chỉ gửi số tổng hợp giá đối thủ, không gửi tên SKU và dữ liệu WM. Không lưu lịch sử. Hãy đối chiếu nhận định với số trên báo cáo.</p>
@@ -196,19 +201,25 @@
 
       <!-- Giá đối thủ -->
       <div id="view-price" class="view" hidden>
-        <div class="card p-admin" data-admin>
+        <!-- Quản trị: chỉ Admin, thu gọn để không lẫn với báo cáo -->
+        <details class="card p-admin" id="p-admin" data-admin>
+          <summary><b>Quản lý dữ liệu giá</b> <span class="small" id="p-job"></span></summary>
           <div class="p-actions">
+            <select id="p-scope" title="Lấy giá ở cửa hàng nào"><option value="all">Tất cả các nơi trong thiết lập</option><option value="urban">Chỉ BHX thành thị</option><option value="rural">Chỉ BHX nông thôn</option><option value="BHX">Chỉ BHX</option><option value="LOTTE">Chỉ LOTTE</option><option value="KFM">Chỉ Kingfoodmart</option></select>
             <button id="p-refresh">Cập nhật giá</button>
             <button class="ghost" id="p-test">Thử kết nối</button>
             <button class="ghost" id="p-confirm" hidden>Vẫn lưu</button>
             <button class="ghost" id="p-cancel" hidden>Huỷ lần này</button>
-            <span class="small" id="p-job"></span>
           </div>
-          <p class="muted small p-note">Giá chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Mỗi lần có thể mất 15–30 phút, cần giữ tab này mở; lỡ đóng tab thì bấm lại để chạy tiếp. Dữ liệu cũ giữ nguyên cho tới khi lấy đủ.</p>
+          <p class="muted small p-note">Giá chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Mỗi tỉnh có tối đa 2 cửa hàng (thành thị và nông thôn); lấy cả hai có thể mất 1–3 giờ, chỉ một loại thì khoảng một nửa. Cần giữ tab này mở; lỡ đóng tab thì bấm lại để chạy tiếp. Dữ liệu cũ giữ nguyên cho tới khi lấy đủ. Chỉ lưu giá đối thủ, không lưu giá WM.</p>
           <details id="p-setup"><summary>Thiết lập tỉnh và cửa hàng</summary>
             <p class="small" id="p-keys"></p>
-            <div class="table-wrap"><table id="t-p-cfg"><thead><tr><th>Tỉnh</th><th>provinceId</th><th>wardId</th><th>storeId</th><th></th></tr></thead><tbody></tbody></table></div>
-            <div class="p-actions"><button class="ghost" id="p-cfg-auto" hidden>Lấy đủ các tỉnh có BHX</button><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
+            <div class="table-wrap"><table id="t-p-cfg"><thead><tr><th>Chuỗi</th><th>Tỉnh</th><th>Khu vực</th><th>provinceId</th><th>wardId</th><th>storeId</th><th>Địa chỉ cửa hàng</th><th></th></tr></thead><tbody></tbody></table></div>
+            <div class="p-actions"><button class="ghost" id="p-cfg-auto" hidden>Lấy đủ các tỉnh có BHX</button><button class="ghost" id="p-cfg-chains">Thêm LOTTE và Kingfoodmart</button><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
+          </details>
+          <details id="p-import-box" hidden><summary>Chép lịch sử giá từ bản cũ (Apps Script)</summary>
+            <p class="muted small p-note">Chép các lần lấy giá đã lưu ở bản cũ sang bản Firebase, để biểu đồ theo thời gian có đủ các mốc trước đây. Chỉ cần làm 1 lần; bấm lại cũng không nhân đôi dữ liệu. Ngày nào bản Firebase đã có giá thì giữ giá của bản Firebase.</p>
+            <div class="p-actions"><button class="ghost" id="p-import">Chép lịch sử</button><span class="small" id="p-import-msg"></span></div>
           </details>
           <details><summary>Tải file giá từ notebook (dự phòng)</summary>
             <div class="p-upload">
@@ -216,61 +227,124 @@
               <button id="p-save" hidden>Lưu vào hệ thống</button>
             </div>
           </details>
-          <p class="muted small p-note">Chỉ lưu giá đối thủ, không lưu giá WM. Dữ liệu được giữ lâu dài, không tự xoá sau 48 giờ.</p>
-        </div>
-        <div class="controls card">
-          <label>Tỉnh <select id="p-tinh"></select></label>
-          <label>Ngành hàng <select id="p-cat"><option value="">Tất cả</option></select></label>
-          <label>Thương hiệu <select id="p-brand"><option value="">Tất cả</option></select></label>
-          <label>Tìm SKU <input id="p-q" type="search" placeholder="Tên hoặc mã"></label>
-          <label class="inline"><input id="p-promo" type="checkbox"> Chỉ SKU có khuyến mãi</label>
+          <details><summary>Lịch sử các lần lấy giá</summary><div class="table-wrap"><table id="t-p-runs"><thead><tr><th>Ngày</th><th>Nơi lấy giá</th><th>File</th><th>Cửa hàng</th><th>Người tải</th><th class="num">SKU</th><th class="num">Mới</th><th class="num">Tăng</th><th class="num">Giảm</th><th class="num">Không còn</th></tr></thead><tbody></tbody></table></div></details>
+        </details>
+
+        <!-- Thanh lọc: dính trên cùng khi cuộn -->
+        <div class="card p-filter" id="p-filter">
+          <div class="p-frow">
+            <label>Đối thủ <select id="p-chain"><option value="BHX">Bách Hóa Xanh</option></select></label>
+            <span class="p-sep"></span>
+            <label>Miền <select id="p-mien"><option value="">Tất cả</option></select></label>
+            <label>Vùng <select id="p-vung"><option value="">Tất cả</option></select></label>
+            <label>Tỉnh <select id="p-tinh"></select></label>
+            <label>Khu vực <select id="p-khu"></select></label>
+            <span class="p-sep"></span>
+            <label>Ngành lớn <select id="p-l1"><option value="">Tất cả</option></select></label>
+            <label>Nhóm <select id="p-l2"><option value="">Tất cả</option></select></label>
+            <label>Ngành <select id="p-cat"><option value="">Tất cả</option></select></label>
+            <button class="link small" id="p-more-btn" type="button">Thêm bộ lọc</button>
+            <button class="link small" id="p-reset" type="button">Xoá lọc</button>
+          </div>
+          <div class="p-frow" id="p-more" hidden>
+            <label>Thương hiệu <select id="p-brand"><option value="">Tất cả</option></select></label>
+            <label>Tìm SKU <input id="p-q" type="search" placeholder="Tên hoặc mã"></label>
+            <label class="inline"><input id="p-promo" type="checkbox"> Chỉ SKU có khuyến mãi</label>
+            <label class="inline"><input id="p-out" type="checkbox"> Chỉ SKU không mua được</label>
+          </div>
+          <p class="small p-source" id="p-source"></p>
           <span class="muted small" id="p-msg"></span>
         </div>
-        <div class="card" id="p-empty"><h3>Chưa có dữ liệu giá</h3><p class="muted">Admin bấm Cập nhật giá ở trên để lấy giá lần đầu.</p></div>
+
+        <div class="card" id="p-empty"><h3>Chưa có dữ liệu giá</h3><p class="muted">Admin mở <b>Quản lý dữ liệu giá</b> ở trên và bấm Cập nhật giá để lấy giá lần đầu.</p></div>
         <div id="p-report" hidden>
-          <p class="card small" id="p-source"></p>
           <p class="err small" id="p-quality" hidden></p>
-          <div class="card" id="p-compare"><h3>So sánh giá giữa các tỉnh</h3>
-            <p class="muted small" id="p-compare-need" hidden>Cần dữ liệu của ít nhất 2 tỉnh.</p>
-            <div id="p-compare-body">
-              <p class="muted small" id="p-compare-note"></p>
-              <div class="p-two">
-                <div class="table-wrap"><table id="t-p-prov"><thead><tr><th>Tỉnh</th><th>Cửa hàng</th><th>Ngày giá</th><th class="num">SKU</th><th class="num">% có KM</th><th class="num">Chỉ số giá bán</th><th class="num">Chỉ số giá gốc</th></tr></thead><tbody></tbody></table></div>
-                <div class="table-wrap"><table id="t-p-matrix"><thead></thead><tbody></tbody></table></div>
+          <nav class="p-tabs" id="p-tabs" role="tablist">
+            <button data-ptab="overview" role="tab">Tổng quan</button>
+            <button data-ptab="promo" role="tab">Khuyến mãi</button>
+            <button data-ptab="region" role="tab">So sánh vùng</button>
+            <button data-ptab="trend" role="tab">Xu hướng</button>
+            <button data-ptab="sku" role="tab">Danh sách SKU <span class="muted" id="p-count"></span></button>
+          </nav>
+
+          <!-- 1. Tổng quan: có gì cần chú ý -->
+          <section class="p-pane" data-pane="overview">
+            <div class="kpis four" id="p-kpis"></div>
+            <div class="card"><h3>Điểm cần chú ý</h3>
+              <p class="muted small">Nhận định tự động từ số liệu của nơi đang xem, chỉ nêu khi thay đổi vượt ngưỡng. Hệ thống không có giá WM nên không kết luận WM đắt hay rẻ hơn.</p>
+              <ol class="p-insights" id="p-insights"></ol>
+            </div>
+          </section>
+
+          <!-- 2. Khuyến mãi: BHX đang đẩy gì -->
+          <section class="p-pane" data-pane="promo" hidden>
+            <div class="p-two">
+              <div class="card"><h3 id="p-cats-title">% SKU có khuyến mãi theo ngành</h3><p class="muted small" id="p-cats-note"></p><div id="p-cats"></div></div>
+              <div class="card"><h3>Số SKU theo mức giảm</h3><p class="muted small">Chỉ tính SKU có giảm giá.</p><div id="p-dist"></div></div>
+            </div>
+            <div class="p-two">
+              <div class="card"><h3 id="p-cat-title">Chi tiết theo ngành</h3><div class="table-wrap"><table id="t-p-cat"><thead><tr><th id="p-cat-head">Ngành</th><th class="num">Số SKU</th><th class="num">% có KM</th><th class="num">Giảm trung vị</th><th class="num">Giá trung vị (đ)</th><th class="num">% không mua được</th></tr></thead><tbody></tbody></table></div></div>
+              <div class="card"><h3>Thương hiệu khuyến mãi nhiều nhất</h3><div class="table-wrap"><table id="t-p-brand"><thead><tr><th>Thương hiệu</th><th class="num">SKU có KM</th><th class="num">Số SKU</th><th class="num">% có KM</th><th class="num">Giảm trung vị</th></tr></thead><tbody></tbody></table></div></div>
+            </div>
+          </section>
+
+          <!-- 3. So sánh vùng: ở đâu BHX rẻ hơn, mạnh tay hơn -->
+          <section class="p-pane" data-pane="region" hidden>
+            <div class="card" id="p-compare"><h3 id="p-compare-title">So sánh giá giữa các tỉnh</h3>
+              <p class="muted small" id="p-compare-need" hidden>Cần dữ liệu của ít nhất 2 tỉnh.</p>
+              <div id="p-compare-body">
+                <p class="muted small" id="p-compare-note"></p>
+                <div class="table-wrap"><table id="t-p-prov"><thead><tr><th>Tỉnh</th><th>Vùng</th><th>Cửa hàng</th><th>Ngày giá</th><th class="num">SKU</th><th class="num">% có KM</th><th class="num">% không mua được</th><th class="num">Chỉ số giá bán</th><th class="num">Chỉ số giá gốc</th></tr></thead><tbody></tbody></table></div>
               </div>
-              <h4>SKU chênh giá nhiều nhất giữa các tỉnh</h4>
-              <div class="table-wrap"><table id="t-p-gap"><thead></thead><tbody></tbody></table></div>
             </div>
-          </div>
-          <div class="kpis six" id="p-kpis"></div>
-          <div class="p-two">
-            <div class="card"><h3>Chỉ số giá BHX theo thời gian</h3>
-              <p class="muted small" id="p-trend-need">Cần ít nhất 2 lần tải file ở 2 ngày khác nhau.</p>
-              <div id="p-trend-body" hidden><p class="muted small"><span id="p-basket-n"></span> Giá gốc tăng mới là tăng giá thật; giá bán còn thay đổi theo khuyến mãi. Rê chuột vào điểm để xem số.</p><div id="p-index" class="p-chart"></div></div>
+            <div class="card"><h3>Thành thị so với nông thôn trong cùng tỉnh</h3>
+              <p class="muted small" id="p-area-note"></p>
+              <div class="table-wrap"><table id="t-p-area"><thead><tr><th>Tỉnh</th><th>Vùng</th><th class="num">SKU chung</th><th class="num">Nông thôn so với thành thị: giá bán</th><th class="num">Giá gốc</th><th class="num">% có KM thành thị</th><th class="num">% có KM nông thôn</th><th class="num">SKU khác giá</th></tr></thead><tbody></tbody></table></div>
             </div>
-            <div class="card"><h3>% SKU giảm giá theo thời gian</h3>
-              <p class="muted small">Cường độ giảm giá của BHX qua các lần lấy giá, theo ngành và thương hiệu đang lọc.</p>
-              <div id="p-rate" class="p-chart"></div>
+            <details class="card"><summary><b>Chỉ số giá theo tỉnh và ngành</b></summary><div class="table-wrap"><table id="t-p-matrix"><thead></thead><tbody></tbody></table></div></details>
+            <details class="card"><summary><b>SKU chênh giá nhiều nhất giữa các tỉnh</b></summary><div class="table-wrap"><table id="t-p-gap"><thead></thead><tbody></tbody></table></div></details>
+          </section>
+
+          <!-- 4. Xu hướng: đang thay đổi thế nào -->
+          <section class="p-pane" data-pane="trend" hidden>
+            <p class="card muted" id="p-trend-need">Cần ít nhất 2 lần lấy giá ở 2 ngày khác nhau của nơi đang xem để vẽ xu hướng.</p>
+            <div id="p-trend-body" hidden>
+              <div class="card"><h3>Thay đổi so với lần trước</h3>
+                <p class="muted small" id="p-change-need" hidden></p>
+                <div id="p-change-body"><p class="small" id="p-change-sum"></p><div class="table-wrap"><table id="t-p-change"><thead><tr><th>SKU đổi giá mạnh nhất</th><th>Ngành</th><th class="num">Giá trước (đ)</th><th class="num">Giá nay (đ)</th><th class="num">Thay đổi</th></tr></thead><tbody></tbody></table></div></div>
+              </div>
+              <div class="p-two">
+                <div class="card"><h3>Chỉ số giá theo thời gian</h3><p class="muted small"><span id="p-basket-n"></span> Giá gốc tăng mới là tăng giá thật; giá bán còn thay đổi theo khuyến mãi.</p><div id="p-index" class="p-chart"></div></div>
+                <div class="card"><h3>% SKU giảm giá theo thời gian</h3><p class="muted small">Theo ngành và thương hiệu đang lọc.</p><div id="p-rate" class="p-chart"></div></div>
+              </div>
             </div>
-          </div>
-          <div class="card"><h3>Thay đổi so với lần trước</h3>
-            <p class="muted small" id="p-change-need">Cần ít nhất 2 lần tải file ở 2 ngày khác nhau.</p>
-            <div id="p-change-body" hidden><p class="small" id="p-change-sum"></p><div class="table-wrap"><table id="t-p-change"><thead><tr><th>SKU đổi giá mạnh nhất</th><th>Ngành</th><th class="num">Giá trước (đ)</th><th class="num">Giá nay (đ)</th><th class="num">Thay đổi</th></tr></thead><tbody></tbody></table></div></div>
-          </div>
-          <div class="p-two">
-            <div class="card"><h3>% SKU có khuyến mãi theo ngành</h3><p class="muted small">15 ngành cao nhất. Bấm một ngành để lọc.</p><div id="p-cats"></div></div>
-            <div class="card"><h3>Số SKU theo mức giảm</h3><p class="muted small">Chỉ tính SKU có giảm giá.</p><div id="p-dist"></div></div>
-          </div>
-          <div class="p-two">
-            <div class="card"><h3>Chi tiết theo ngành</h3><div class="table-wrap"><table id="t-p-cat"><thead><tr><th>Ngành</th><th class="num">Số SKU</th><th class="num">% có KM</th><th class="num">Giảm trung vị</th><th class="num">Giá trung vị (đ)</th></tr></thead><tbody></tbody></table></div></div>
-            <div class="card"><h3>Thương hiệu khuyến mãi nhiều nhất</h3><div class="table-wrap"><table id="t-p-brand"><thead><tr><th>Thương hiệu</th><th class="num">SKU có KM</th><th class="num">Số SKU</th><th class="num">% có KM</th><th class="num">Giảm trung vị</th></tr></thead><tbody></tbody></table></div></div>
-          </div>
-          <div class="card">
-            <div class="card-head"><h3>Danh sách SKU, giảm sâu trước <span class="muted small" id="p-count"></span></h3><button class="ghost" id="p-export">Xuất CSV</button></div>
-            <div class="table-wrap tall"><table id="t-p-sku"><thead><tr><th>SKU</th><th>Ngành</th><th>Thương hiệu</th><th>Đơn vị</th><th class="num">Giá hiện tại (đ)</th><th class="num">Giá gốc (đ)</th><th class="num">% giảm</th><th class="num">So lần trước</th><th>Khuyến mãi</th><th>Tình trạng</th></tr></thead><tbody></tbody></table></div>
-            <div class="pager small" id="p-pager"></div>
-          </div>
-          <div class="card"><details><summary>Lịch sử các lần tải file</summary><div class="table-wrap"><table id="t-p-runs"><thead><tr><th>Ngày</th><th>Tỉnh</th><th>File</th><th>Cửa hàng</th><th>Người tải</th><th class="num">SKU</th><th class="num">Mới</th><th class="num">Tăng</th><th class="num">Giảm</th><th class="num">Không còn</th></tr></thead><tbody></tbody></table></div></details></div>
+            <div class="card"><h3>SKU không mua được qua các lần lấy giá</h3>
+              <p class="muted small">Hết hàng hoặc ngừng bán tại cửa hàng đang xem, trên toàn bộ SKU của cửa hàng. Chỉ báo gián tiếp: BHX không công khai số lượng bán.</p>
+              <div id="p-out-trend"></div>
+            </div>
+          </section>
+
+          <!-- 5. Danh sách SKU -->
+          <section class="p-pane" data-pane="sku" hidden>
+            <div class="card">
+              <div class="card-head"><h3>Danh sách SKU, giảm sâu trước</h3><input id="p-q-sku" type="search" class="qf-table" placeholder="Tìm SKU theo tên hoặc mã…"><button class="ghost" id="p-export">Xuất CSV</button></div>
+              <div class="table-wrap tall"><table id="t-p-sku"><thead><tr><th>SKU</th><th>Ngành</th><th>Thương hiệu</th><th>Đơn vị</th><th class="num">Giá hiện tại (đ)</th><th class="num">Giá gốc (đ)</th><th class="num">% giảm</th><th class="num">So lần trước</th><th>Khuyến mãi</th><th>Tình trạng</th></tr></thead><tbody></tbody></table></div>
+              <div class="pager small" id="p-pager"></div>
+            </div>
+          </section>
+
+          <details class="card p-method"><summary>Phương pháp tính</summary>
+            <ul class="small">
+              <li><b>Nguồn:</b> giá đăng trên website BHX tại 1 cửa hàng cho mỗi tỉnh và khu vực; giá tại quầy có thể khác. Lấy lại nhiều lần trong 1 ngày được gộp thành 1 mốc.</li>
+              <li><b>Giá bán</b> = giá flash sale nếu thấp hơn giá thường, nếu không thì giá thường. <b>Giá gốc</b> = giá niêm yết nếu cao hơn giá bán. <b>% giảm</b> = 1 − giá bán ÷ giá gốc.</li>
+              <li><b>Có khuyến mãi</b> = có giảm giá, có dòng chữ khuyến mãi hoặc có flash sale. <b>Giảm giá</b> (dùng khi so với lần trước) = giá bán thấp hơn giá gốc.</li>
+              <li><b>Chỉ số giá giữa các tỉnh:</b> rổ SKU có giá ở mọi tỉnh đang so; tổng giá của tỉnh ÷ trung bình các tỉnh × 100. Chỉ so cửa hàng cùng khu vực.</li>
+              <li><b>Chỉ số giá theo thời gian:</b> rổ SKU có giá ở mọi mốc; tổng giá mốc đó ÷ tổng giá mốc đầu × 100.</li>
+              <li><b>Thành thị so với nông thôn:</b> rổ SKU có giá ở cả 2 cửa hàng của tỉnh; tổng giá nông thôn ÷ tổng giá thành thị × 100.</li>
+              <li><b>Miền, Vùng</b> theo file WM+: tỉnh thuộc miền, vùng có nhiều WM nhất. <b>Ngành lớn, Nhóm</b> do hệ thống xếp theo tên ngành BHX.</li>
+              <li><b>Thành thị</b> = cửa hàng ở phường có nhiều BHX trong 3 km nhất; <b>Nông thôn</b> = cửa hàng ở xã có mật độ trung vị.</li>
+            </ul>
+          </details>
         </div>
       </div>
 
@@ -326,15 +400,17 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611111105"></script>
-  <script src="demo-data.js?v=202611111105"></script>
-  <script src="gas-api.js?v=202611111105"></script>
-  <script src="upload.js?v=202611111105"></script>
-  <script src="area.js?v=202611111105"></script>
-  <script src="nearby.js?v=202611111105"></script>
-  <script src="firebase-api.js?v=202611111105"></script>
-  <script src="price.js?v=202611111105"></script>
-  <script src="bot.js?v=202611111105"></script>
-  <script src="app.js?v=202611111105"></script>
+  <script src="config.js?v=202611111658"></script>
+  <script src="demo-data.js?v=202611111658"></script>
+  <script src="gas-api.js?v=202611111658"></script>
+  <script src="upload.js?v=202611111658"></script>
+  <script src="area.js?v=202611111658"></script>
+  <script src="nearby.js?v=202611111658"></script>
+  <script src="firebase-api.js?v=202611111658"></script>
+  <script src="cat-tree.js?v=202611111658"></script>
+<script src="price.js?v=202611111658"></script>
+  <script src="bot.js?v=202611111658"></script>
+  <script src="quick-find.js?v=202611111658"></script>
+<script src="app.js?v=202611111658"></script>
 </body>
 </html>

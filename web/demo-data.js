@@ -83,17 +83,18 @@
     { email: "dongnghiep1.demo@example.com", role: "viewer", added: "2026-10-30" },
   ];
 
-  let botHasKey = !/[?&]nokey=1/.test(location.search), botUsed = 0, priceStore = null, priceJob = null, priceCfg = [{ tinh: "Hồ Chí Minh", provinceId: "1", wardId: "1", storeId: "1" }, { tinh: "Hà Nội", provinceId: "2", wardId: "2", storeId: "2" }, { tinh: "Cần Thơ", provinceId: "3", wardId: "3", storeId: "3" }];
+  let botHasKey = !/[?&]nokey=1/.test(location.search), botProv = "gemini", botModel = {}, botUsed = 0, priceStore = null, priceJob = null, priceCfg = [{ tinh: "Hồ Chí Minh", khu: "Thành thị", provinceId: "1", wardId: "1", storeId: "1", addr: "Địa chỉ giả 1" }, { tinh: "Hồ Chí Minh", khu: "Nông thôn", provinceId: "1", wardId: "4", storeId: "4", addr: "Địa chỉ giả 4" }, { tinh: "Hà Nội", khu: "Thành thị", provinceId: "2", wardId: "2", storeId: "2", addr: "" }, { tinh: "Cần Thơ", khu: "Thành thị", provinceId: "3", wardId: "3", storeId: "3", addr: "" }];
   function priceDemo() {
     if (priceStore) return priceStore;
     let seed = 20261104;
     const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
-    const CATS = ["Sữa các loại", "Mì, phở, cháo gói", "Dầu ăn, gia vị", "Nước giải khát", "Bánh kẹo", "Rau củ, trái cây", "Thịt, cá, trứng", "Giặt xả, tẩy rửa", "Chăm sóc cá nhân", "Đồ đông lạnh"];
-    const PROV = [{ tinh: "Hồ Chí Minh", store: "demo-11", rate: 0.36, level: {} }, { tinh: "Hà Nội", store: "demo-22", rate: 0.3, level: {} }, { tinh: "Cần Thơ", store: "demo-33", rate: 0.26, level: {} }];
+    const CATS = ["Sữa tươi", "Sữa chua uống liền", "Mì ăn liền", "Phở, bún ăn liền", "Dầu ăn", "Nước mắm", "Nước ngọt", "Cà phê hoà tan", "Bánh quy", "Kẹo cứng", "Rau lá", "Trái cây", "Thịt heo", "Nước giặt", "Nước rửa chén", "Sữa tắm", "Kem đánh răng", "Hàng đông chế biến"];   // tên ngành thật của BHX để thử cây ngành
+    const PROV = [{ tinh: "Hồ Chí Minh", store: "demo-11", rate: 0.36, level: {} }, { tinh: "Hà Nội", store: "demo-22", rate: 0.3, level: {} }, { tinh: "Cần Thơ", store: "demo-33", rate: 0.26, level: {} },
+      { tinh: "Hồ Chí Minh · Nông thôn", store: "demo-12", rate: 0.3, level: {} }, { tinh: "Cần Thơ · Nông thôn", store: "demo-34", rate: 0.22, level: {} }];   // 2 tỉnh có thêm cửa hàng nông thôn
     PROV.forEach((p) => CATS.forEach((c) => (p.level[c] = 0.97 + rnd() * 0.06)));
     const dates = Array.from({ length: 8 }, (_, w) => new Date(Date.now() - (7 - w) * 7 * 864e5).toISOString().slice(0, 10));
     const round = (x) => Math.round(x / 100) * 100, skus = [], items = [], hist = [], runs = [];
-    PROV.forEach((p) => dates.forEach((date) => runs.push({ date, tinh: p.tinh, store: p.store, file: "gia_demo.xlsx", by: "demo@example.com", n: 0, added: 0, gone: 0, up: 0, down: 0 })));
+    PROV.forEach((p) => dates.forEach((date) => runs.push({ date, tinh: p.tinh, store: p.store, file: "gia_demo.xlsx", by: "demo@example.com", n: 0, oos: 0, added: 0, gone: 0, up: 0, down: 0 })));
     for (let k = 0; k < 900; k++) {
       const cat = CATS[Math.floor(rnd() * CATS.length)], id = String(900000 + k), list = (8 + rnd() * rnd() * 240) * 1000;
       skus.push({ id, code: String(100000 + k), name: `SKU demo ${String(k + 1).padStart(4, "0")}`, cat, brand: `Thương hiệu ${"ABCDEFGHIJKLMN"[k % 14]}`, unit: "Gói", url: "" });
@@ -106,7 +107,7 @@
           const on = rnd() < p.rate, off = on ? 0.05 + rnd() * rnd() * 0.5 : 0, final = round(base * (1 - off)), sig = final + "|" + base;
           if (sig !== keep) { hist.push([dates[w], p.tinh, id, final, base]); keep = sig; }
           row = { tinh: p.tinh, store: p.store, id, final, base, off: base > final ? 1 - final / base : 0, promo: on, title: on && rnd() < 0.2 ? "Mua 2 giảm thêm" : "", can: rnd() > 0.04, first_seen: dates[from], last_seen: dates[to] };
-          runs[pi * dates.length + w].n++;
+          runs[pi * dates.length + w].n++; if (!row.can) runs[pi * dates.length + w].oos++;
         }
         if (row) items.push(row);
       });
@@ -189,8 +190,9 @@
     async priceFinish() { return { ...priceJob }; },
     async priceCancel() { priceJob = null; return { provinces: priceCfg, missing: [], job: null }; },
     // Bot ở bản xem trước: trả lời mẫu dựng từ số liệu, không gọi Gemini và không gửi gì ra ngoài.
-    async botStatus() { return { hasKey: botHasKey, used: botUsed, limit: 30 }; },
-    async saveBotKey(k) { await new Promise((r) => setTimeout(r, 200)); if (!/^[\x21-\x7e]{20,200}$/.test(k.trim())) throw new Error("Key không đúng dạng. Hãy chép lại đủ key, không có dấu cách."); botHasKey = true; return { hasKey: true, used: botUsed, limit: 30 }; },
+    async botStatus() { return { hasKey: botHasKey, provider: botHasKey ? botProv : "", model: botHasKey ? (botModel[botProv] || (botProv === "claude" ? "claude-opus-5-5" : "gemini-3.5-flash-lite")) : "", used: botUsed, limit: 30 }; },
+    async saveBotModel(m) { await new Promise((r) => setTimeout(r, 200)); m = String(m).trim().toLowerCase(); if (!(botProv === "claude" ? /^claude-/ : /^gemini/).test(m)) throw new Error("Tên model không khớp với key đang dùng."); botModel[botProv] = m; return this.botStatus(); },
+    async saveBotKey(k) { await new Promise((r) => setTimeout(r, 200)); if (!/^[\x21-\x7e]{20,200}$/.test(k.trim())) throw new Error("Key không đúng dạng. Hãy chép lại đủ key, không có dấu cách."); botHasKey = true; botProv = /^sk-ant-/.test(k.trim()) ? "claude" : "gemini"; return { hasKey: true, provider: botProv, used: botUsed, limit: 30 }; },
     async askBot(q, ctx) {
       await new Promise((r) => setTimeout(r, 500));
       botUsed++;
