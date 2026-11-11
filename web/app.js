@@ -219,14 +219,24 @@
     wheelGuard();
     // OSM chặn tile (403) nếu thiếu Referer; trang đặt no-referrer → riêng tile gửi origin (chỉ tên miền, không đường dẫn).
     // Dùng địa chỉ chính tile.openstreetmap.org như OSM khuyến nghị. Ô nào lỗi (máy chủ bận, giới hạn lượt) thì tải lại tối đa 3 lần, không để mảng xám.
-    const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    // Mạng công ty chặn tile.openstreetmap.org nhưng cho a/b/c (kiểm tra 11/11/2026) → dùng a/b/c, lỗi thì thử máy chủ khác.
+    const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       { maxZoom: 18, keepBuffer: 1, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
+    // Lỗi thì đổi sang máy chủ dự phòng a/b/c của OSM (mạng công ty có thể chặn một trong hai loại địa chỉ).
+    const HOSTS = ["a", "b", "c"];
     tiles.on("tileerror", ({ tile, coords }) => {
       const n = Number(tile.dataset.retry || 0);
-      if (n >= 3) return;
+      if (n >= 4) return;
       tile.dataset.retry = n + 1;
-      setTimeout(() => { if (tile.isConnected) tile.src = tiles.getTileUrl(coords) + "?r=" + (n + 1); }, 1500 * (n + 1));
+      const url = tiles.getTileUrl(coords), cur = (/\/\/([abc])\.tile/.exec(url) || [])[1] || "a";
+      const next = HOSTS[(HOSTS.indexOf(cur) + 1 + n) % 3];
+      setTimeout(() => { if (tile.isConnected) tile.src = url.replace(/\/\/[abc]\.tile/, `//${next}.tile`) + (n >= 2 ? "?r=" + n : ""); }, 500 * (n + 1));
     });
+    tiles.on("tileload", () => { S.tileOk = (S.tileOk || 0) + 1; });
+    tiles.on("tileerror", () => { S.tileErr = (S.tileErr || 0) + 1; });
+    setTimeout(() => {   // nền bản đồ không tải được ô nào: báo rõ thay vì để màn hình xám
+      if (!S.tileOk && S.tileErr) $("#snap-info").textContent += " · Không tải được nền bản đồ từ OpenStreetMap (mạng có thể đang chặn openstreetmap.org)";
+    }, 15000);
     bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map); noteLayer = L.layerGroup().addTo(map);
     map.on("popupclose", () => (popupClosedAt = Date.now()));
     syncPick(); rtHint();
@@ -831,7 +841,8 @@
     $("#snap-info").textContent = `${fmt(S.wm.length)} WM (${snap.wmVersion}`
       + (snap.wmExpires ? `, tự xoá ${snap.wmExpires.toLocaleString("vi-VN")} — còn ${fmt(Math.max(left, 0), 0)} giờ` : "")
       + `) · ${fmt(snap.bhx.length)} BHX, cập nhật ${snap.bhxUpdated}`
-      + ((snap.comp || []).length ? ` · ${fmt(snap.comp.length)} cửa hàng chuỗi khác, cập nhật ${snap.compUpdated}` : "");
+      + ((snap.comp || []).length ? ` · ${fmt(snap.comp.length)} cửa hàng chuỗi khác, cập nhật ${snap.compUpdated}` : "")
+      + (API.loadInfo ? ` · Tải từ ${API.loadInfo}` : "");
     computeAll(); fillProvinces(); fillQuan();
     buildBhxAll(); buildWmMarkers(); renderOverview(); fitScope();
     if (!S.wm.length && !S.all.length) $("#snap-info").textContent = "Chưa có dữ liệu WM+ (chưa upload hoặc đã tự xoá sau 48 giờ) — Admin vào tab WM+ (upload) để tải file lên.";

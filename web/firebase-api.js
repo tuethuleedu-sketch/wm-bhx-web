@@ -140,7 +140,11 @@
   }
   const delDocs = (col, ids) => Promise.all(ids.map((id) => db.collection(col).doc(id).delete().catch(() => {})));
   const wmLive = (m) => m.wmParts > 0 && m.wmExpires > Date.now();
-  async function readMetaCache() { try { const d = await cacheMeta().get(); return d.exists ? d.data() : null; } catch (_) { return null; } }
+  let metaErr = "";
+  async function readMetaCache() {
+    try { const d = await cacheMeta().get(); metaErr = d.exists ? "" : "chưa có bản sao"; return d.exists ? d.data() : null; }
+    catch (e) { metaErr = e.code === "permission-denied" ? "Firestore từ chối đọc, kiểm tra Quy tắc" : "không đọc được Firestore"; return null; }
+  }
   async function readCache(m) {
     const P = m.parts || {};
     const [bhx, comp, changes, wm] = await Promise.all([
@@ -161,8 +165,8 @@
     return { wmGen, wmParts: parts.length, wmExpires: expires, wmVersion: version };
   }
   // Lấy bản gốc từ Apps Script rồi ghi bản sao. Ghi phần mới trước, đổi meta sau, xoá phần cũ cuối cùng.
-  async function refreshCache() {
-    const b = await gas.getBoot.call(G), s = b.snapshot, old = (await readMetaCache()) || {};
+  async function refreshCache(pre) {
+    const b = pre || await gas.getBoot.call(G), s = b.snapshot, old = (await readMetaCache()) || {};
     const gen = String(Date.now()), parts = {}, writes = [];
     for (const [name, arr] of [["bhx", s.bhx || []], ["comp", s.comp || []], ["changes", b.changes || []]]) {
       const c = chunks(arr); parts[name] = c.length;
@@ -188,18 +192,27 @@
     await cacheMeta().set({ wmGen: "", wmParts: 0, wmExpires: 0, wmVersion: "" }, { merge: true });
     await delDocs("cache_wm", partIds(m.wmGen, "wm", m.wmParts));
   }
+  // Ghi lại nguồn và thời gian tải để hiện dưới bản đồ, biết ngay đang nhanh hay đang phải quay về Apps Script.
   async function cachedOrGas() {
     await ready();
+    const t0 = Date.now(), sec = () => ((Date.now() - t0) / 1000).toFixed(1).replace(".", ",") + " giây";
     const m = await readMetaCache(), admin = ME && ME.role === "admin";
+    let why = m ? "bản sao quá 30 giờ" : metaErr;
     if (m && Date.now() - m.syncedAt < FRESH_MS) {
       try {
         const b = await readCache(m);
         if (admin) { purgeWm(m).catch(() => {}); if (Date.now() - m.syncedAt > REFRESH_MS) refreshCache().catch(() => {}); }
+        G.loadInfo = "Firebase, " + sec();
         return b;
-      } catch (_) { /* bản sao lỗi hoặc đang ghi: lấy từ Apps Script */ }
+      } catch (e) { why = e.code === "permission-denied" ? "Firestore từ chối đọc, kiểm tra Quy tắc" : "bản sao đang cập nhật"; }
     }
-    if (admin) return refreshCache();
-    return gas.getBoot.call(G);
+    const b = await gas.getBoot.call(G);
+    if (admin) {
+      try { await refreshCache(b); why += "; đã chép sang Firebase cho lần sau"; }
+      catch (e) { why += "; chép sang Firebase lỗi: " + (e.code === "permission-denied" ? "Firestore từ chối ghi, kiểm tra Quy tắc" : e.message); }
+    }
+    G.loadInfo = `Apps Script, ${sec()} (${why})`;
+    return { ...b, me: ME };
   }
   Object.assign(G, {
     getBoot: cachedOrGas,
