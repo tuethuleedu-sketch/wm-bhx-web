@@ -218,8 +218,15 @@
     map = L.map("map", { preferCanvas: true, renderer: L.canvas({ tolerance: 5 }), scrollWheelZoom: false }).setView([20.8, 106.2], 9);
     wheelGuard();
     // OSM chặn tile (403) nếu thiếu Referer; trang đặt no-referrer → riêng tile gửi origin (chỉ tên miền, không đường dẫn).
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      { maxZoom: 18, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
+    // Dùng địa chỉ chính tile.openstreetmap.org như OSM khuyến nghị. Ô nào lỗi (máy chủ bận, giới hạn lượt) thì tải lại tối đa 3 lần, không để mảng xám.
+    const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 18, keepBuffer: 1, attribution: "© OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
+    tiles.on("tileerror", ({ tile, coords }) => {
+      const n = Number(tile.dataset.retry || 0);
+      if (n >= 3) return;
+      tile.dataset.retry = n + 1;
+      setTimeout(() => { if (tile.isConnected) tile.src = tiles.getTileUrl(coords) + "?r=" + (n + 1); }, 1500 * (n + 1));
+    });
     bhxLayer = L.layerGroup().addTo(map); ringLayer = L.layerGroup().addTo(map); noteLayer = L.layerGroup().addTo(map);
     map.on("popupclose", () => (popupClosedAt = Date.now()));
     syncPick(); rtHint();

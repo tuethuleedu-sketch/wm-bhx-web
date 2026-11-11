@@ -40,6 +40,22 @@
     if (Date.now() - new Date(t.authTime).getTime() > SESSION_DAYS * 864e5) { G.sessionNote = "Phiên đăng nhập đã hết 7 ngày, hãy đăng nhập lại."; await auth.signOut(); return false; }
     return true;
   }
+  // Quyền đọc từ Firestore cho nhanh; Apps Script vẫn kiểm tra lại ở nền (ghi nhật ký, thu hồi quyền có hiệu lực).
+  // Chưa có trong Firestore thì hỏi Apps Script. null = không có quyền.
+  let ME = null;
+  async function whoAmI() {
+    const email = auth.currentUser.email.toLowerCase();
+    let role = null;
+    try { const d = await db.collection("users").doc(email).get(); if (d.exists) role = d.data().role; } catch (_) {}
+    if (role) {
+      G.me().catch(async (e) => { if (e.code === "AUTH") { await auth.signOut(); location.reload(); } });
+      return (ME = { email, role });
+    }
+    try { ME = await G.me(); }
+    catch (e) { if (e.code !== "AUTH") throw e; G.sessionNote = e.message; await auth.signOut(); return (ME = null); }
+    if (ME.role === "admin") db.collection("users").doc(email).set({ role: "admin" }).catch(() => {});
+    return ME;
+  }
 
   Object.assign(G, {
     fb: true,
@@ -47,14 +63,14 @@
     async currentUser() {
       await ready();
       if (!auth.currentUser || !(await sessionOk(auth.currentUser))) return null;
-      return gas.currentUser.call(G);
+      return whoAmI();
     },
     signIn: (email, password) => wrap(async () => {
       await ready();
       const { user } = await auth.signInWithEmailAndPassword(email, password);
       if (!user.emailVerified) { await user.sendEmailVerification(); await auth.signOut(); throw new Error("Email chưa được xác nhận. Đã gửi lại thư xác nhận, hãy mở thư rồi đăng nhập lại."); }
-      const me = await gas.currentUser.call(G);
-      if (!me) { const note = G.sessionNote || "Email này chưa được cấp quyền."; await auth.signOut(); throw new Error(note); }
+      const me = await whoAmI();
+      if (!me) throw new Error(G.sessionNote || "Email này chưa được cấp quyền.");
       return me;
     }),
     fbRegister: (email, password) => wrap(async () => {
@@ -69,7 +85,7 @@
       const u = auth.currentUser;
       await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, password));
       await u.updatePassword(newPassword);
-      return gas.currentUser.call(G);
+      return whoAmI();
     }),
     async signOut() { await ready(); await auth.signOut(); },
     resetPassword: (email) => wrap(async () => { await ready(); await auth.sendPasswordResetEmail(email); return { sent: true }; }),
@@ -77,8 +93,11 @@
     async listUsers() {
       const list = await gas.listUsers();
       await ready();
+      const keep = new Set(list.map((u) => u.email.toLowerCase()));
+      const old = await db.collection("users").get();
       const batch = db.batch();
       list.forEach((u) => batch.set(db.collection("users").doc(u.email.toLowerCase()), { role: u.role }));
+      old.docs.forEach((d) => { if (!keep.has(d.id)) batch.delete(db.collection("users").doc(d.id)); });   // quyền bị gỡ ở bản cũ cũng gỡ ở đây
       await batch.commit();
       return list;
     },
@@ -92,6 +111,117 @@
       const r = await gas.removeUser(email);
       await ready();
       await db.collection("users").doc(String(email).trim().toLowerCase()).delete();
+      return r;
+    },
+  });
+
+  // ---------- Bản đồ: WM+, cửa hàng đối thủ, biến động ----------
+  // Apps Script vẫn giữ bản gốc (tự lấy cửa hàng BHX và đối thủ mỗi sáng, vì BHX chỉ cho máy chủ Google lấy).
+  // Firestore giữ bản sao để mở web đọc nhanh. Chỉ Admin ghi bản sao; Viewer chỉ đọc.
+  // WM+ để riêng ở cache_wm, kèm hạn 48 giờ: quá hạn thì quy tắc Firestore chặn đọc, Admin xoá khi mở web, Firestore TTL xoá dự phòng.
+  const CACHE_MAX = 700000, FRESH_MS = 30 * 36e5, REFRESH_MS = 36e5;
+  const cacheMeta = () => db.collection("cache").doc("meta");
+  const enc = new TextEncoder();
+  function chunks(arr) {
+    const out = []; let cur = [], size = 2;
+    for (const x of arr) {
+      const n = enc.encode(JSON.stringify(x)).length + 1;
+      if (cur.length && size + n > CACHE_MAX) { out.push(cur); cur = []; size = 2; }
+      cur.push(x); size += n;
+    }
+    if (cur.length || !out.length) out.push(cur);
+    return out.map((c) => JSON.stringify(c));
+  }
+  const partIds = (gen, name, n) => Array.from({ length: n }, (_, i) => `${gen}_${name}_${i}`);
+  async function readParts(col, ids) {
+    const docs = await Promise.all(ids.map((id) => db.collection(col).doc(id).get()));
+    if (docs.some((d) => !d.exists)) throw new Error("Bản sao đang được cập nhật");
+    return docs.flatMap((d) => JSON.parse(d.data().d));
+  }
+  const delDocs = (col, ids) => Promise.all(ids.map((id) => db.collection(col).doc(id).delete().catch(() => {})));
+  const wmLive = (m) => m.wmParts > 0 && m.wmExpires > Date.now();
+  async function readMetaCache() { try { const d = await cacheMeta().get(); return d.exists ? d.data() : null; } catch (_) { return null; } }
+  async function readCache(m) {
+    const P = m.parts || {};
+    const [bhx, comp, changes, wm] = await Promise.all([
+      readParts("cache", partIds(m.gen, "bhx", P.bhx || 0)), readParts("cache", partIds(m.gen, "comp", P.comp || 0)),
+      readParts("cache", partIds(m.gen, "changes", P.changes || 0)),
+      wmLive(m) ? readParts("cache_wm", partIds(m.wmGen, "wm", m.wmParts)) : [],
+    ]);
+    const live = wmLive(m);
+    return {
+      me: ME, settings: m.settings ? JSON.parse(m.settings) : { viewer_can_export: true }, changes,
+      snapshot: { wm: live ? wm : [], bhx, comp, compUpdated: m.compUpdated || "", compStatus: m.compStatus || "",
+        wmVersion: live ? m.wmVersion : "chưa có", wmExpires: live ? new Date(m.wmExpires) : null, bhxUpdated: m.bhxUpdated || "chưa chạy" },
+    };
+  }
+  async function writeWm(rows, expires, version) {
+    const wmGen = String(Date.now()), parts = chunks(rows), expireAt = firebase.firestore.Timestamp.fromMillis(expires);
+    await Promise.all(parts.map((d, i) => db.collection("cache_wm").doc(`${wmGen}_wm_${i}`).set({ d, expireAt })));
+    return { wmGen, wmParts: parts.length, wmExpires: expires, wmVersion: version };
+  }
+  // Lấy bản gốc từ Apps Script rồi ghi bản sao. Ghi phần mới trước, đổi meta sau, xoá phần cũ cuối cùng.
+  async function refreshCache() {
+    const b = await gas.getBoot.call(G), s = b.snapshot, old = (await readMetaCache()) || {};
+    const gen = String(Date.now()), parts = {}, writes = [];
+    for (const [name, arr] of [["bhx", s.bhx || []], ["comp", s.comp || []], ["changes", b.changes || []]]) {
+      const c = chunks(arr); parts[name] = c.length;
+      c.forEach((d, i) => writes.push(db.collection("cache").doc(`${gen}_${name}_${i}`).set({ d })));
+    }
+    await Promise.all(writes);
+    const exp = s.wmExpires ? s.wmExpires.getTime() : 0;
+    let wm = { wmGen: "", wmParts: 0, wmExpires: 0, wmVersion: "" };
+    if (s.wm && s.wm.length && exp > Date.now()) {
+      wm = old.wmVersion === s.wmVersion && wmLive(old) ? { wmGen: old.wmGen, wmParts: old.wmParts, wmExpires: Math.min(old.wmExpires, exp), wmVersion: old.wmVersion }
+        : await writeWm(s.wm, exp, s.wmVersion);
+    }
+    await cacheMeta().set({ gen, parts, ...wm, syncedAt: Date.now(), settings: JSON.stringify(b.settings || {}),
+      compUpdated: s.compUpdated || "", compStatus: s.compStatus || "", bhxUpdated: s.bhxUpdated || "" });
+    if (old.gen) for (const [name, n] of Object.entries(old.parts || {})) await delDocs("cache", partIds(old.gen, name, n));
+    if (old.wmGen && old.wmGen !== wm.wmGen) await delDocs("cache_wm", partIds(old.wmGen, "wm", old.wmParts || 0));
+    G.listUsers().catch(() => {});
+    return { ...b, me: ME };
+  }
+  // Admin mở web sau khi WM+ hết 48 giờ: xoá hẳn phần WM+ trong bản sao.
+  async function purgeWm(m) {
+    if (!m || !m.wmParts || m.wmExpires > Date.now()) return;
+    await cacheMeta().set({ wmGen: "", wmParts: 0, wmExpires: 0, wmVersion: "" }, { merge: true });
+    await delDocs("cache_wm", partIds(m.wmGen, "wm", m.wmParts));
+  }
+  async function cachedOrGas() {
+    await ready();
+    const m = await readMetaCache(), admin = ME && ME.role === "admin";
+    if (m && Date.now() - m.syncedAt < FRESH_MS) {
+      try {
+        const b = await readCache(m);
+        if (admin) { purgeWm(m).catch(() => {}); if (Date.now() - m.syncedAt > REFRESH_MS) refreshCache().catch(() => {}); }
+        return b;
+      } catch (_) { /* bản sao lỗi hoặc đang ghi: lấy từ Apps Script */ }
+    }
+    if (admin) return refreshCache();
+    return gas.getBoot.call(G);
+  }
+  Object.assign(G, {
+    getBoot: cachedOrGas,
+    getSnapshot: async () => (await cachedOrGas()).snapshot,
+    getChanges: async () => (await cachedOrGas()).changes,
+    getSettings: async () => (await cachedOrGas()).settings,
+    async setSetting(key, value) {
+      const r = await gas.setSetting(key, value);
+      const m = await readMetaCache();
+      if (m) await cacheMeta().set({ settings: JSON.stringify({ ...(m.settings ? JSON.parse(m.settings) : {}), [key]: value }) }, { merge: true });
+      return r;
+    },
+    // Lưu vào Apps Script như cũ, rồi chép ngay WM+ mới sang bản sao. Hạn tính từ trước lúc lưu nên không dài hơn bản gốc.
+    async publishWm(rows) {
+      const t0 = Date.now(), r = await gas.publishWm(rows);
+      await ready();
+      const old = (await readMetaCache()) || {};
+      if (!old.gen) { await refreshCache(); return r; }
+      rows = rows.map((w) => ({ ...w, ma: String(w.ma).trim(), ten: w.ten || String(w.ma).trim(), lat: Number(w.lat), lng: Number(w.lng), chuoi: w.chuoi || "WM+" }));   // giống cách Apps Script lưu
+      const wm = await writeWm(rows, t0 + 48 * 36e5, r.version + " — " + new Date(t0 + 7 * 36e5).toISOString().slice(0, 10).split("-").reverse().join("/"));
+      await cacheMeta().set(wm, { merge: true });
+      if (old.wmGen) await delDocs("cache_wm", partIds(old.wmGen, "wm", old.wmParts || 0));
       return r;
     },
   });

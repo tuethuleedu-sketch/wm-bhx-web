@@ -48,6 +48,7 @@
       catch (err) { if (err.code === "AUTH") { this.sessionNote = err.message; return null; } throw err; }
     },
     hasSession: () => !!token,
+    me: () => call("me"),
     sessionNote: "",
     async getBoot() {
       const b = boot || await call("boot");
