@@ -27,8 +27,24 @@ let bhxMode = "ok", priceBump = 0, bhxCalls = 0, sizesSeen = new Set();
 const realFetch = window.fetch;
 window.fetch = async (url, o) => {
   if (url === "http://gas.test/exec") { const b = JSON.parse(o.body); window.__gasToken = b.token; if (b.action === "boot") { gasBoots++; return new Response(JSON.stringify({ data: { me: { email: "admin@gmail.com", role: meRole }, settings: { viewer_can_export: false }, snapshot: fakeSnap(), changes: [{ date: "2026-11-10", chain: "BHX", type: "open", ma: "9", dia_chi: "y", tinh: "Hà Nội", lat: 21, lng: 105.8 }] } })); }
+    if (b.action === "kfmPricePage") { window.__kfm = (window.__kfm || 0) + 1; return new Response(JSON.stringify({ data: !b.slug ? { cats: [{ slug: "sua", name: "Sữa, bơ, phô mai" }] }
+      : { page: b.page, last: 2, items: [{ id: "KFM:" + b.page, code: "893" + b.page, name: "Sữa K" + b.page, grp: "Sữa, bơ, phô mai", cat: "Sữa tươi", brand: "", unit: "Hộp", url: "", final: 9000, base: 10000, off: 0.1, title: "", can: b.page !== 2 }] } })); }
+    if (b.action === "prices") return new Response(JSON.stringify({ data: { skus: [{ id: "g1", code: "c1", name: "SP cũ", cat: "Sữa tươi", brand: "TH", unit: "Hộp", url: "" }],
+      items: [{ tinh: "Hà Nội", store: "3", id: "g1", final: 9000, base: 10000, off: 0.1, promo: true, title: "", can: true, first_seen: "2026-10-01", last_seen: "2026-10-08" }, { tinh: "Hà Nội", store: "3", id: "10338000", final: 1, base: 2, off: 0.5, promo: true, title: "", can: true, first_seen: "2026-09-01", last_seen: "2026-10-08" }],
+      runs: [{ date: "2026-10-01", at: "a1", tinh: "Hà Nội", store: "3", file: "f", by: "x", n: 2 }, { date: "2026-10-08", at: "a2", tinh: "Hà Nội", store: "3", file: "f", by: "x", n: 2 }],
+      hist: [["2026-10-01", "Hà Nội", "g1", 9500, 10000], ["2026-10-08", "Hà Nội", "g1", 9000, 10000], ["2026-10-08", "Hà Nội", "10338000", 1, 2]] } }));
     if (b.action === "me") return new Response(JSON.stringify({ data: { email: "admin@gmail.com", role: meRole } }));
     if (b.action === "publishWm") return new Response(JSON.stringify({ data: { version: "v2", rows: b.rows.length, added: 0, removed: 0, moved: 0 } })); if (b.action === "listUsers") return new Response(JSON.stringify({ data: [{ email: "Viewer@gmail.com", role: "viewer" }] })); return new Response(JSON.stringify({ data: true })); }
+  if (/lottemart\.vn\/v1\/p\/mart\/es\/vi_nsg\/categories\/tree/.test(url)) return new Response(JSON.stringify({ data: [{ id: "143", child: [{ id: "158", child: [{ id: "1581" }] }, { id: "148", child: [{ id: "1481" }] }] }, { id: "506", child: [] }, { id: "420", child: [{ id: "421" }] }] }));
+  if (/lottemart\.vn\/v1\/p\/mart\/es\/vi_nsg\/categories\/(\d+)\/products/.test(url)) {
+    const cat = +RegExp.$1, body = JSON.parse(o.body);
+    window.__lotteBody = body;
+    window.__lotteCats = (window.__lotteCats || []).concat(cat);
+    if (cat === 148) return new Response(JSON.stringify({ data: { items: Array.from({ length: 1000 }, (_, i) => ({ id: 9000 + i, sku: "x" + i, name: "Nhiều " + i, in_stock: "1", stock_qty: 1, category_full_path: ["A / Chế Phẩm Từ Sữa / Sữa"], price: { VND: { default: 1000, price: 1000 } } })) } }));
+    const items = cat === 158 ? [{ id: 501, sku: "8936123160241", name: "Sữa L", url: "https://www.lottemart.vn/vi-nsg/product/sua-l", in_stock: "1", stock_qty: 9, category_full_path: ["THỰC PHẨM KHÔ", "THỰC PHẨM KHÔ / Chế Phẩm Từ Sữa", "THỰC PHẨM KHÔ / Chế Phẩm Từ Sữa / Sữa", "Virtual cat / Giao 60 Phút / Giao 60 Phút / X"], price: { VND: { default: 20000, price: 16000, special_price: 0, default_original: 20000, default_discount_label: "-20%" } } },
+      { id: 502, sku: "8930", name: "Sữa L2", url: "https://evil.example/x", in_stock: "0", stock_qty: 0, category_full_path: ["THỰC PHẨM KHÔ / Chế Phẩm Từ Sữa / Sữa"], price: { VND: { default: 10000, price: 10000, special_price: 8000 } } }] : [];
+    return new Response(JSON.stringify({ data: { items, total_items: items.length } }));
+  }
   if (/AjaxProduct/.test(url)) {
     bhxCalls++; const b = JSON.parse(o.body); sizesSeen.add(b.PageSize);
     if (bhxMode === "403") return new Response("{}", { status: 403 });
@@ -109,6 +125,7 @@ const realST = window.setTimeout; window.setTimeout = (f, ms, ...a) => realST(f,
   const d0 = new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
   check("lưu theo tỉnh, không có mảng lồng", typeof store.get("price_cur/ha_noi").items === "string" && store.get("price_cur/can_tho").tinh === "Cần Thơ");
   let p = await A.getPrices();
+  check("mỗi lần lấy giá ghi số SKU không mua được", p.runs.every((r) => r.oos === 0), p.runs.map((r) => r.oos));
   check("đọc lại đúng dạng báo cáo cần", p.items.length === 220 && p.skus.length === 110 && p.runs.length === 2 && p.items[0].final > 0 && p.items[0].promo === true && p.items[0].first_seen === d0, p.items[0]);
   check("ngành, đơn vị, thương hiệu đúng", p.skus[0].cat === "Sữa" && p.skus[0].unit === "Gói" && p.skus[0].url.startsWith("https://www.bachhoaxanh.com/"));
   let h = await A.getPriceHist("Hà Nội");
@@ -130,6 +147,56 @@ const realST = window.setTimeout; window.setTimeout = (f, ms, ...a) => realST(f,
   bhxMode = "none"; j = await run();
   check("BHX trả rỗng: không ghi đè dữ liệu", j.status === "paused" && /không trả SKU/.test(j.msg), j);
   await A.priceCancel();
+
+  // ---- 2 cửa hàng mỗi tỉnh: thành thị và nông thôn ----
+  bhxMode = "ok";
+  check("trùng tỉnh và khu vực → lỗi", /Trùng tỉnh và khu vực/.test(await err(() => A.savePriceConfig([{ tinh: "Hà Nội", khu: "Nông thôn", provinceId: "1", wardId: "2", storeId: "3" }, { tinh: "Hà Nội", khu: "Nông thôn", provinceId: "1", wardId: "2", storeId: "4" }]))));
+  await A.savePriceConfig([{ tinh: "Hà Nội", provinceId: "1", wardId: "2", storeId: "3" }, { tinh: "Hà Nội", khu: "Nông thôn", provinceId: "1", wardId: "8", storeId: "9", addr: "Xã Sóc Sơn" }]);
+  const cfg2 = await A.priceConfig();
+  check("thiết lập giữ khu vực và địa chỉ; dòng cũ không ghi khu vực tính là thành thị", cfg2.provinces.length === 2 && cfg2.provinces[0].khu === "Thành thị" && cfg2.provinces[1].khu === "Nông thôn" && cfg2.provinces[1].addr === "Xã Sóc Sơn", cfg2.provinces);
+  const runScope = async (s) => { let j = await A.priceStart(s), g = 0; while (j.status === "running" && g++ < 500) j = await A.priceStep(j.id); return j; };
+  j = await runScope("rural");
+  check("chỉ nông thôn: chỉ lấy cửa hàng nông thôn, lưu riêng, không đụng giá thành thị", j.status === "done" && j.summary.provinces.length === 1 && j.summary.provinces[0].tinh === "Hà Nội · Nông thôn" && typeof store.get("price_cur/ha_noi_nong_thon").items === "string" && store.get("price_cur/ha_noi").tinh === "Hà Nội", j.summary);
+  p = await A.getPrices();
+  check("báo cáo có giá theo nơi lấy giá, kèm địa chỉ cửa hàng nông thôn", p.items.some((x) => x.tinh === "Hà Nội · Nông thôn") && p.items.some((x) => x.tinh === "Hà Nội") && p.runs.some((r) => r.tinh === "Hà Nội · Nông thôn" && r.addr === "Xã Sóc Sơn" && r.store === "9"));
+  h = await A.getPriceHist("Hà Nội · Nông thôn");
+  check("lịch sử nông thôn tách riêng", h.length > 0 && h.every((r) => r[1] === "Hà Nội · Nông thôn"), h.length);
+  await A.priceCancel();
+  await A.savePriceConfig([{ tinh: "Hà Nội", provinceId: "1", wardId: "2", storeId: "3" }]);
+  check("chọn chỉ nông thôn khi chưa có cửa hàng nông thôn → báo rõ", /Chưa có cửa hàng Nông thôn/.test(await err(() => A.priceStart("rural"))));
+  await A.savePriceRegions({ hanoi: { mien: "Miền Bắc", vung: "Vùng 1" }, "bad key!": { mien: "x" } });
+  p = await A.getPrices();
+  check("lưu bảng tỉnh → miền/vùng, bỏ khoá lạ", p.regions && p.regions.hanoi.mien === "Miền Bắc" && !p.regions["bad key!"], p.regions);
+  // ---- LOTTE (trình duyệt gọi thẳng) và Kingfoodmart (qua Apps Script) ----
+  await A.priceCancel();
+  await A.savePriceConfig([{ tinh: "Hà Nội", provinceId: "1", wardId: "2", storeId: "3" }, { chain: "LOTTE", tinh: "Hồ Chí Minh", storeId: "nsg", addr: "Quận 7" }, { chain: "KFM", tinh: "Hồ Chí Minh", storeId: "x" }]);
+  check("mã siêu thị LOTTE sai dạng → lỗi", /mã siêu thị LOTTE/.test(await err(() => A.savePriceConfig([{ chain: "LOTTE", tinh: "Hà Nội", storeId: "12" }]))));
+  const cfgC = (await A.priceConfig()).provinces;
+  check("thiết lập giữ chuỗi; Kingfoodmart luôn là giá online", cfgC[1].chain === "LOTTE" && cfgC[2].chain === "KFM" && cfgC[2].storeId === "online" && cfgC[0].chain === "BHX", cfgC);
+  j = await runScope("LOTTE");
+  const lot = store.get("price_cur/lotte_ho_chi_minh"), lotItems = lot ? JSON.parse(lot.items) : [];
+  check("LOTTE: chỉ lấy LOTTE, lưu riêng theo chuỗi", j.status === "done" && j.summary.provinces.length === 1 && j.summary.provinces[0].tinh === "LOTTE: Hồ Chí Minh" && lotItems.length === 1002 && window.__lotteBody.page_size === 1000, j.summary);
+  check("LOTTE: lấy theo ngành con, bỏ ngành không cần (điện gia dụng); chỉ đi sâu ở ngành con chạm 1.000 SKU", JSON.stringify(window.__lotteCats) === JSON.stringify([158, 148, 1481, 506]), window.__lotteCats);
+  p = await A.getPrices();
+  const L1 = p.items.find((x) => x.id === "LOTTE:501"), L2 = p.items.find((x) => x.id === "LOTTE:502"), S1 = p.skus.find((s) => s.id === "LOTTE:501"), S2 = p.skus.find((s) => s.id === "LOTTE:502");
+  check("LOTTE: giá bán, giá gốc, % giảm, nhãn KM, hết hàng", L1.final === 16000 && L1.base === 20000 && Math.abs(L1.off - 0.2) < 1e-9 && L1.promo && L1.title === "-20%" && L1.can && L2.final === 8000 && L2.base === 10000 && !L2.can, { L1, L2 });
+  check("LOTTE: mã vạch, nhóm ngành của LOTTE, bỏ đường dẫn lạ", S1.code === "8936123160241" && S1.grp === "Chế Phẩm Từ Sữa" && S1.cat === "Sữa" && S1.url.startsWith("https://www.lottemart.vn/") && S2.url === "", { S1, S2 });
+  window.__kfm = 0; j = await runScope("KFM");
+  const kf = store.get("price_cur/kfm_ho_chi_minh"), kfItems = kf ? JSON.parse(kf.items) : [];
+  check("Kingfoodmart: lấy qua Apps Script đủ các trang, lưu riêng", j.status === "done" && j.summary.provinces[0].tinh === "KFM: Hồ Chí Minh" && kfItems.length === 2 && window.__kfm === 3, { s: j.summary, calls: window.__kfm, n: kfItems.length });
+  check("Kingfoodmart: SKU hết hàng được ghi nhận", kfItems.some((a) => a[0] === "KFM:2" && a[6] === 0) && kfItems.some((a) => a[0] === "KFM:1" && a[6] === 1));
+  check("lấy chuỗi khác không đụng giá BHX", store.get("price_cur/ha_noi").tinh === "Hà Nội");
+  await A.priceCancel();
+
+  // ---- Chép lịch sử từ bản Apps Script ----
+  const runsBefore = (await A.getPrices()).runs.length;
+  let im = await A.importGasPrices();
+  const curHN = store.get("price_cur/ha_noi"), dHN = JSON.parse(curHN.dates), itHN = JSON.parse(curHN.items);
+  check("chép lịch sử: thêm các mốc cũ, giữ mốc của Firebase", im.provinces[0].tinh === "Hà Nội" && im.dates === 2 && dHN.includes("2026-10-01") && dHN.includes("2026-10-08") && dHN.includes(d0) && !!store.get("price_hist/ha_noi_2026-10-01"), { im, dHN });
+  check("chép lịch sử: thêm SKU chỉ có ở bản cũ, lùi ngày xuất hiện đầu của SKU đã có", itHN.some((a) => a[0] === "g1" && a[8] === "2026-10-08") && itHN.find((a) => a[0] === "10338000")[7] === "2026-09-01" && itHN.find((a) => a[0] === "10338000")[1] > 1, itHN.find((a) => a[0] === "10338000"));
+  check("chép lịch sử: thêm các lần tải cũ và tên SKU", (await A.getPrices()).runs.length === runsBefore + 2 && (await A.getPrices()).skus.some((s) => s.id === "g1"));
+  im = await A.importGasPrices();
+  check("chép lại lần 2: không nhân đôi", im.dates === 0 && (await A.getPrices()).runs.length === runsBefore + 2 && JSON.parse(store.get("price_cur/ha_noi").items).length === itHN.length);
   out.textContent += `\nKẾT QUẢ: ${fail ? "CÓ LỖI" : "TẤT CẢ ĐẠT"} (${pass}/${pass + fail})`;
   document.title = fail ? "FAIL" : "PASS"; window.__result = { pass, fail };
 })().catch((e) => { document.getElementById("out").textContent += "LỖI CHẠY TEST: " + e.stack; window.__result = { error: String(e) }; });

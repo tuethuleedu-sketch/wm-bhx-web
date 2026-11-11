@@ -498,12 +498,44 @@
   M.props.delete("price_cfg");
   M.fetchHandler = (url) => {
     if (/GetFull/.test(url)) return { code: 200, body: { data: { provinces: [{ id: 1027, name: "Thành phố Hồ Chí Minh" }, { id: 5, name: "Tỉnh Đồng Nai" }, { id: 6, name: "Tỉnh Trống" }] } } };
-    if (/provinceId=5&/.test(url)) return { code: 200, body: { data: { total: 3, stores: [{ storeId: 1, wardId: 11, lat: 10, lng: 106, isStoreVirtual: false }, { storeId: 2, wardId: 22, lat: 11, lng: 107, isStoreVirtual: false }, { storeId: 3, wardId: 33, lat: 12, lng: 108, isStoreVirtual: false }] } } };
-    if (/provinceId=1027&/.test(url)) return { code: 200, body: { data: { total: 1, stores: [{ storeId: 9, wardId: 99, lat: 10, lng: 106, isStoreVirtual: false }] } } };
+    if (/provinceId=5&/.test(url)) return { code: 200, body: { data: { total: 5, stores: [
+      { storeId: 1, wardId: 11, lat: 10, lng: 106, isStoreVirtual: false, storeAddress: "12 Lê Lợi, Phường Trấn Biên, Đồng Nai" },
+      { storeId: 4, wardId: 44, lat: 10.01, lng: 106.01, isStoreVirtual: false, storeAddress: "5 Hùng Vương, P. Tam Hiệp" },
+      { storeId: 5, wardId: 55, lat: 10.5, lng: 106.5, isStoreVirtual: false, storeAddress: "Phường 3, xa trung tâm" },
+      { storeId: 2, wardId: 22, lat: 11, lng: 107, isStoreVirtual: false, storeAddress: "Ấp 1, Xã Phú Lý, Đồng Nai" },
+      { storeId: 3, wardId: 33, lat: 12, lng: 108, isStoreVirtual: false, storeAddress: "Thị trấn Tân Phú cũ" },
+      { storeId: 6, wardId: 66, lat: 12, lng: 108, isStoreVirtual: true, storeAddress: "Xã ảo" }] } } };
+    if (/provinceId=1027&/.test(url)) return { code: 200, body: { data: { total: 1, stores: [{ storeId: 9, wardId: 99, lat: 10, lng: 106, isStoreVirtual: false, storeAddress: "Xã Bình Chánh, TP.HCM" }] } } };
     return { code: 200, body: { data: { total: 0, stores: [] } } };
   };
   r = adm("priceAutoStores");
-  check("tự lập danh sách tỉnh: giữ cửa hàng cũ, tỉnh mới chọn cửa hàng giữa, bỏ tỉnh không có cửa hàng", r.ok && r.data.length === 2 && r.data[0].storeId === "6834" && r.data[1].tinh === "Đồng Nai" && r.data[1].storeId === "2" && r.data[1].wardId === "22", r);
+  const pick = (t, k) => r.data && r.data.find((x) => x.tinh === t && x.khu === k);
+  check("tự lập danh sách: mỗi tỉnh 2 cửa hàng thành thị và nông thôn, giữ cửa hàng cũ, bỏ tỉnh không có cửa hàng", r.ok && r.data.length === 4 && pick("Hồ Chí Minh", "Thành thị").storeId === "6834" && pick("Hồ Chí Minh", "Nông thôn").storeId === "9" && !r.data.some((x) => x.tinh === "Trống"), r);
+  check("thành thị: cửa hàng ở phường dày cửa hàng nhất, kèm địa chỉ", pick("Đồng Nai", "Thành thị").storeId === "4" && pick("Đồng Nai", "Thành thị").wardId === "44" && /Tam Hiệp/.test(pick("Đồng Nai", "Thành thị").addr), r.data);
+  check("nông thôn: cửa hàng ở xã hoặc thị trấn cũ, mật độ trung vị, bỏ cửa hàng ảo", pick("Đồng Nai", "Nông thôn").storeId === "2", r.data);
+  r = adm("priceAutoStores", { keep: [{ tinh: "Đồng Nai", khu: "Nông thôn", provinceId: "5", wardId: "33", storeId: "3", addr: "x" }] });
+  check("giữ cửa hàng nông thôn đã chọn tay, thành thị vẫn tự chọn", r.ok && pick("Đồng Nai", "Nông thôn").storeId === "3" && pick("Đồng Nai", "Thành thị").storeId === "4", r.data);
+  // ---- Giá Kingfoodmart: Apps Script lấy hộ từng trang, không ghi Sheet ----
+  let kfmCalls = [];
+  M.fetchHandler = (url) => {
+    kfmCalls.push(url);
+    if (/categories\/tree/.test(url)) return { code: 200, body: { mappingCategories: [{ slug: "hot-deal", name: "Khuyến mãi HOT" }, { slug: "sua-bo-pho-mai", name: "Sữa, bơ, phô mai", mappingCategories: [{ slug: "sua-tuoi", name: "Sữa tươi" }] }] } };
+    if (/sua-bo-pho-mai\/products\?page=1&limit=50/.test(url)) return { code: 200, body: { products: [
+      { id: "11", name: "Sữa A", subCate: "sua-tuoi", originalPrice: 30000, discountPrice: 24000, stockState: "IN_STOCK", inStock: 5, slug: "sua-a", variants: [{ sku: "8930001", unit: { name: "Hộp" }, promotionSummary: { text: "Giảm 20%" } }] },
+      { id: "12", name: "Sữa B", subCate: "la-la", originalPrice: 20000, discountPrice: 0, stockState: "OUT_OF_STOCK", inStock: 0, variants: [{ sku: "8930002", unit: { name: "Lốc" } }] }], pagination: { current: 1, last_page: 3, total: 120 } } };
+    return { code: 404, body: {} };
+  };
+  const sheetsBefore = JSON.stringify(sheetRows("settings"));
+  r = adm("kfmPricePage", { slug: "" });
+  check("Kingfoodmart: lấy danh sách ngành, bỏ nhóm khuyến mãi trùng lặp", r.ok && r.data.cats.length === 1 && r.data.cats[0].slug === "sua-bo-pho-mai", r);
+  r = adm("kfmPricePage", { slug: "sua-bo-pho-mai", page: 1 });
+  const kf0 = r.data && r.data.items[0], kf1 = r.data && r.data.items[1];
+  check("Kingfoodmart: chuẩn hoá giá, mã vạch, ngành con, khuyến mãi, hết hàng", r.ok && r.data.last === 3 && kf0.id === "KFM:11" && kf0.code === "8930001" && kf0.final === 24000 && kf0.base === 30000 && Math.abs(kf0.off - 0.2) < 1e-9 && kf0.cat === "Sữa tươi" && kf0.grp === "Sữa, bơ, phô mai" && kf0.title === "Giảm 20%" && kf0.can === true && kf1.final === 20000 && kf1.off === 0 && kf1.can === false && kf1.cat === "Sữa, bơ, phô mai", r.data);
+  check("Kingfoodmart: nhớ danh mục, không ghi gì vào Sheet", kfmCalls.filter((u) => /tree/.test(u)).length === 1 && JSON.stringify(sheetRows("settings")) === sheetsBefore, kfmCalls);
+  r = adm("kfmPricePage", { slug: "khong-co" });
+  check("Kingfoodmart: ngành lạ → lỗi rõ", /không tồn tại/.test(r.error), r);
+  r = call("kfmPricePage", { token: viewer.token, slug: "" });
+  check("Kingfoodmart: Viewer không gọi được", /Chỉ Admin/.test(r.error), r);
   M.fetchHandler = prevFetch; if (cfgOld) M.props.set("price_cfg", cfgOld);
   M.fetchHandler = fbOld;
 
@@ -564,6 +596,49 @@
   M.props.set("bot_used:" + Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd"), "30");
   r = adm("askBot", { question: "x", context: BOT_CTX });
   check("hết lượt trong ngày: không gọi Gemini", /hết 30 lượt/.test(r.error), r);
+  M.props.delete("bot_used:" + Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd"));
+
+  // ---- Dán key Claude thì bot dùng Claude ----
+  const KC = "sk-ant-api03-KHOA-CLAUDE-1234567890";
+  r = adm("saveBotKey", { key: " " + KC + " " });
+  check("dán key Claude: lưu CLAUDE_API_KEY, xoá key Gemini, báo đang dùng Claude", r.ok && r.data.provider === "claude" && M.props.get("CLAUDE_API_KEY") === KC && !M.props.has("GEMINI_API_KEY") && !JSON.stringify(r).includes(KC), r);
+  let cMode = "ok";
+  const cErr = (http, type, message) => ({ code: http, body: { type: "error", error: { type, message } } });
+  M.fetchHandler = (url, opts) => {
+    botReq = { url, h: opts.headers, b: JSON.parse(opts.payload) };
+    if (cMode === "401") return cErr(401, "authentication_error", "invalid x-api-key " + KC);
+    if (cMode === "credit") return cErr(400, "invalid_request_error", "Your credit balance is too low");
+    if (cMode === "429") return cErr(429, "rate_limit_error", "slow");
+    if (cMode === "529") return cErr(529, "overloaded_error", "busy");
+    if (cMode === "404") return cErr(404, "not_found_error", "model");
+    if (cMode === "refusal") return { code: 200, body: { content: [], stop_reason: "refusal" } };
+    if (cMode === "empty") return { code: 200, body: { content: [{ type: "thinking", thinking: "" }], stop_reason: "max_tokens" } };
+    return { code: 200, body: { content: [{ type: "thinking", thinking: "" }, { type: "text", text: "Nhận định " }, { type: "text", text: "của Claude" }], stop_reason: "end_turn" } };
+  };
+  r = adm("askBot", { question: "Tóm tắt", context: BOT_CTX, history: [{ q: "a", a: "b" }] });
+  check("Claude trả lời, bỏ phần suy luận, không trả key", r.ok && r.data.text === "Nhận định của Claude" && !JSON.stringify(r).includes(KC), r);
+  check("gọi đúng API Claude: key ở header x-api-key, đúng phiên bản API, có model dự phòng khi bị từ chối", botReq.url === "https://api.anthropic.com/v1/messages" && botReq.h["x-api-key"] === KC && botReq.h["anthropic-version"] === "2026-10-21" && botReq.h["anthropic-beta"] === "server-side-fallback-2026-07-01" && botReq.b.fallbacks === "default" && !JSON.stringify(botReq.b).includes(KC));
+  check("Claude: đúng model, mức suy luận, trần token, số liệu trong thẻ data", botReq.b.model === "claude-opus-5-5" && botReq.b.output_config.effort === "medium" && botReq.b.max_tokens === 8000 && !("thinking" in botReq.b) && !("temperature" in botReq.b) && /Bạn là chuyên viên/.test(botReq.b.system) && botReq.b.messages.length === 1 && botReq.b.messages[0].role === "user" && /<data>/.test(botReq.b.messages[0].content) && /<cau_truoc>/.test(botReq.b.messages[0].content));
+  const usedC = adm("botStatus").data.used;
+  [["401", /API key Claude không hợp lệ/], ["credit", /hết tín dụng/], ["429", /quá nhanh/], ["529", /quá tải/], ["404", /claude-opus-5-5/], ["refusal", /từ chối/], ["empty", /Claude không trả về nội dung/]].forEach(([m, re]) => {
+    cMode = m; const x = adm("askBot", { question: "x", context: BOT_CTX });
+    check("Claude lỗi " + m + ": báo đúng, che key", re.test(x.error) && !JSON.stringify(x).includes(KC), x);
+  });
+  check("Claude lỗi không tính lượt hỏi", adm("botStatus").data.used === usedC);
+  // ---- Chọn model ----
+  cMode = "ok";
+  r = adm("saveBotModel", { model: " Claude-Haiku-5-5 " });
+  check("chọn model Claude: lưu, trạng thái báo model mới", r.ok && r.data.model === "claude-haiku-5-5" && M.props.get("BOT_MODEL_CLAUDE") === "claude-haiku-5-5", r);
+  adm("askBot", { question: "x", context: BOT_CTX });
+  check("câu hỏi sau dùng model đã chọn", botReq.b.model === "claude-haiku-5-5");
+  r = adm("saveBotModel", { model: "gemini-3.5-flash" });
+  check("key Claude mà chọn model Gemini: báo lỗi, không lưu", /bắt đầu bằng claude-/.test(r.error) && M.props.get("BOT_MODEL_CLAUDE") === "claude-haiku-5-5", r);
+  r = adm("saveBotModel", { model: "claude x; drop" });
+  check("tên model sai dạng: báo lỗi", /không đúng dạng/.test(r.error), r);
+  r = call("saveBotModel", { token: viewer.token, model: "claude-opus-5-5" });
+  check("Viewer không đổi được model", /Chỉ Admin/.test(r.error), r);
+  r = adm("saveBotKey", { key: K20 });
+  check("dán lại key Gemini: quay về Gemini, xoá key Claude", r.ok && r.data.provider === "gemini" && !M.props.has("CLAUDE_API_KEY") && M.props.get("GEMINI_API_KEY") === K20, r);
   M.props.delete("GEMINI_API_KEY");
 
   // ---- Thu hồi quyền, nhật ký, đăng xuất ----
