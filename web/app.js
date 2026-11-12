@@ -790,7 +790,7 @@
     $("#t-versions tbody").innerHTML = (await API.getVersions()).map((v) =>
       `<tr><td>${esc(v.version)}</td><td>${esc(v.uploaded)}</td><td>${esc(v.by)}</td><td class="num">${fmt(v.rows)}</td><td class="num">${v.added}</td><td class="num">${v.removed}</td><td class="num">${v.moved}</td><td>${esc(v.status)}</td></tr>`).join("");
   }
-  const EVENT = { bot: "Hỏi AI", bot_key: "Lưu key AI", bot_model: "Đổi model AI", price_refresh: "Cập nhật giá", login: "Đăng nhập", resume: "Mở lại phiên", logout: "Đăng xuất", denied: '<span class="tag close">Bị từ chối — chưa cấp quyền</span>', login_fail: '<span class="tag close">Sai mật khẩu</span>', pw_change: "Đổi mật khẩu", pw_reset: "Cấp mật khẩu tạm" };
+  const EVENT = { bot: "Hỏi AI", bot_key: "Lưu key AI", bot_model: "Đổi model AI", gh_dispatch: "Chạy GitHub lấy giá chuỗi khác",price_refresh: "Cập nhật giá", login: "Đăng nhập", resume: "Mở lại phiên", logout: "Đăng xuất", denied: '<span class="tag close">Bị từ chối — chưa cấp quyền</span>', login_fail: '<span class="tag close">Sai mật khẩu</span>', pw_change: "Đổi mật khẩu", pw_reset: "Cấp mật khẩu tạm" };
   async function renderLog() {
     $("#t-log tbody").innerHTML = (await API.getAccessLog()).map((r) =>
       `<tr><td>${esc(new Date(r.at).toLocaleString("vi-VN"))}</td><td>${esc(r.email)}</td><td>${EVENT[r.event] || esc(r.event)}</td></tr>`).join("");

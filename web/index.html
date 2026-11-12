@@ -9,7 +9,7 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611111658">
+  <link rel="stylesheet" href="style.css?v=202611121719">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -205,17 +205,19 @@
         <details class="card p-admin" id="p-admin" data-admin>
           <summary><b>Quản lý dữ liệu giá</b> <span class="small" id="p-job"></span></summary>
           <div class="p-actions">
-            <select id="p-scope" title="Lấy giá ở cửa hàng nào"><option value="all">Tất cả các nơi trong thiết lập</option><option value="urban">Chỉ BHX thành thị</option><option value="rural">Chỉ BHX nông thôn</option><option value="BHX">Chỉ BHX</option><option value="LOTTE">Chỉ LOTTE</option><option value="KFM">Chỉ Kingfoodmart</option></select>
+            <select id="p-scope" title="Lấy giá ở cửa hàng nào"><option value="all" selected>Tất cả (BHX ở trang này, chuỗi khác trên GitHub)</option><option value="urban">Chỉ BHX thành thị</option><option value="rural">Chỉ BHX nông thôn</option><option value="BHX">Chỉ BHX</option><option value="LOTTE">Chỉ LOTTE</option><option value="KFM">Chỉ Kingfoodmart</option><option value="COOP">Chỉ Co.op Online</option><option value="EMART">Chỉ Emart</option></select>
             <button id="p-refresh">Cập nhật giá</button>
             <button class="ghost" id="p-test">Thử kết nối</button>
+            <a class="ghost btn-link" href="https://github.com/tuethuleedu-sketch/wm-bhx-price-bench/actions/workflows/sync.yml" target="_blank" rel="noopener" title="Trang GitHub lấy giá LOTTE, Kingfoodmart, Co.op, Emart (xem các lần chạy)">Xem GitHub ↗</a>
             <button class="ghost" id="p-confirm" hidden>Vẫn lưu</button>
             <button class="ghost" id="p-cancel" hidden>Huỷ lần này</button>
           </div>
-          <p class="muted small p-note">Giá chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Mỗi tỉnh có tối đa 2 cửa hàng (thành thị và nông thôn); lấy cả hai có thể mất 1–3 giờ, chỉ một loại thì khoảng một nửa. Cần giữ tab này mở; lỡ đóng tab thì bấm lại để chạy tiếp. Dữ liệu cũ giữ nguyên cho tới khi lấy đủ. Chỉ lưu giá đối thủ, không lưu giá WM.</p>
+          <div class="small" id="p-gh" hidden></div>
+          <p class="muted small p-note">Giá chỉ cập nhật khi Admin bấm nút, không có lịch tự chạy. Bấm Cập nhật giá một lần: BHX lấy ở trang này, khoảng 2 phút mỗi cửa hàng (mỗi tỉnh tối đa 2 cửa hàng: thành thị và nông thôn), cần giữ tab mở, lỡ đóng tab thì bấm lại để chạy tiếp; cùng lúc GitHub lấy LOTTE, Kingfoodmart, Co.op, Emart, khoảng 3–5 phút. GitHub chưa chạy được thì trang này lấy luôn. Dữ liệu cũ giữ nguyên cho tới khi lấy đủ. Chỉ lưu giá đối thủ, không lưu giá WM.</p>
           <details id="p-setup"><summary>Thiết lập tỉnh và cửa hàng</summary>
             <p class="small" id="p-keys"></p>
             <div class="table-wrap"><table id="t-p-cfg"><thead><tr><th>Chuỗi</th><th>Tỉnh</th><th>Khu vực</th><th>provinceId</th><th>wardId</th><th>storeId</th><th>Địa chỉ cửa hàng</th><th></th></tr></thead><tbody></tbody></table></div>
-            <div class="p-actions"><button class="ghost" id="p-cfg-auto" hidden>Lấy đủ các tỉnh có BHX</button><button class="ghost" id="p-cfg-chains">Thêm LOTTE và Kingfoodmart</button><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
+            <div class="p-actions"><button class="ghost" id="p-cfg-auto" hidden>Lấy đủ các tỉnh có BHX</button><button class="ghost" id="p-cfg-chains" title="LOTTE, Kingfoodmart, Co.op Online, Emart">Thêm các chuỗi khác</button><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
           </details>
           <details id="p-import-box" hidden><summary>Chép lịch sử giá từ bản cũ (Apps Script)</summary>
             <p class="muted small p-note">Chép các lần lấy giá đã lưu ở bản cũ sang bản Firebase, để biểu đồ theo thời gian có đủ các mốc trước đây. Chỉ cần làm 1 lần; bấm lại cũng không nhân đôi dữ liệu. Ngày nào bản Firebase đã có giá thì giữ giá của bản Firebase.</p>
@@ -400,17 +402,17 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611111658"></script>
-  <script src="demo-data.js?v=202611111658"></script>
-  <script src="gas-api.js?v=202611111658"></script>
-  <script src="upload.js?v=202611111658"></script>
-  <script src="area.js?v=202611111658"></script>
-  <script src="nearby.js?v=202611111658"></script>
-  <script src="firebase-api.js?v=202611111658"></script>
-  <script src="cat-tree.js?v=202611111658"></script>
-<script src="price.js?v=202611111658"></script>
-  <script src="bot.js?v=202611111658"></script>
-  <script src="quick-find.js?v=202611111658"></script>
-<script src="app.js?v=202611111658"></script>
+  <script src="config.js?v=202611121719"></script>
+  <script src="demo-data.js?v=202611121719"></script>
+  <script src="gas-api.js?v=202611121719"></script>
+  <script src="upload.js?v=202611121719"></script>
+  <script src="area.js?v=202611121719"></script>
+  <script src="nearby.js?v=202611121719"></script>
+  <script src="firebase-api.js?v=202611121719"></script>
+  <script src="cat-tree.js?v=202611121719"></script>
+<script src="price.js?v=202611121719"></script>
+  <script src="bot.js?v=202611121719"></script>
+  <script src="quick-find.js?v=202611121719"></script>
+<script src="app.js?v=202611121719"></script>
 </body>
 </html>

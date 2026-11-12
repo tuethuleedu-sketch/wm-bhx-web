@@ -59,7 +59,7 @@ window.CatTree = (function () {
   const map = new Map();
   Object.entries(TREE).forEach(([l1, groups]) => Object.entries(groups).forEach(([l2, cats]) => cats.forEach((c) => map.set(norm(c), [l1, l2]))));
   const order = Object.keys(TREE).concat(OTHER);
-  // Chuỗi khác: ngành lớn của chuỗi (LOTTE cấp 3, Kingfoodmart cấp 1) xếp vào 11 ngành lớn chung. Nhóm giữ tên ngành của chuỗi.
+  // Chuỗi khác: ngành lớn của chuỗi (LOTTE cấp 3, Kingfoodmart và Co.op cấp 1, Emart cấp 2) xếp vào 11 ngành lớn chung. Nhóm giữ tên ngành của chuỗi.
   const L = { TT: "Thịt, cá, trứng, rau củ", DM: "Hàng đông, hàng mát", SUA: "Sữa các loại", DU: "Đồ uống", KHO: "Mì, gạo, đồ khô", GV: "Gia vị, dầu ăn", BK: "Bánh kẹo, ăn vặt", CS: "Chăm sóc cá nhân", MB: "Mẹ và bé", GG: "Giặt giũ, vệ sinh nhà", GD: "Đồ dùng gia đình" };
   const GROUPS = {
     LOTTE: { "rau củ": L.TT, "thịt": L.TT, "thủy sản": L.TT, "trứng": L.TT, "trái cây": L.TT, "thực phẩm đông lạnh": L.DM, "thực phẩm sơ chế": L.DM, "món ăn nhanh": L.DM, "bánh tươi": L.DM,
@@ -68,6 +68,15 @@ window.CatTree = (function () {
     KFM: { "thế giới trái cây": L.TT, "rau củ quả": L.TT, "thịt, cá, trứng, thủy, hải sản": L.TT, "kem, sữa chua": L.DM, "thực phẩm đông mát": L.DM, "sữa, bơ, phô mai": L.SUA,
       "mì gói, xúc xích, đồ hộp": L.KHO, "gạo, đậu, bột, đồ khô": L.KHO, "bánh kẹo, ăn vặt": L.BK, "bánh tươi, ngũ cốc, ăn sáng": L.BK, "dầu ăn, nước chấm, gia vị": L.GV,
       "bia, rượu, đồ uống có cồn": L.DU, "trà, cà phê, nước giải khát": L.DU, "đồ dùng gia đình": L.GD, "chăm sóc cá nhân": L.CS },
+    COOP: { "rau củ, trái cây": L.TT, "thịt, trứng, hải sản": L.TT, "thức ăn chế biến, bún tươi": L.DM, "thực phẩm đông, mát": L.DM, "sữa, sản phẩm từ sữa": L.SUA,
+      "thức uống": L.DU, "bánh, kẹo, snack": L.BK, "gia vị, gạo, thực phẩm khô": L.KHO, "sản phẩm cho bé": L.MB, "chăm sóc cá nhân": L.CS, "nhà cửa và đời sống": L.GD },
+    EMART: { "bánh mì, bánh ngọt": L.DM, "món ăn chế biến sẵn": L.DM, "rau củ": L.TT, "trái cây": L.TT, "trứng, thịt, hải sản": L.TT, "gạo": L.KHO, "đồ khô": L.KHO,
+      "thực phẩm ăn liền": L.KHO, "sữa": L.SUA, "thực phẩm mát": L.DM, "thực phẩm đông lạnh": L.DM, "bánh kẹo, snack": L.BK, "đồ uống": L.DU,
+      "dầu ăn, bơ thực vật": L.GV, "nước chấm": L.GV, "gia vị, nước sốt": L.GV, "bột, hạt, nấm khô": L.KHO, "thực phẩm dinh dưỡng": L.SUA, "đồ chay": L.KHO,
+      "chăm sóc răng miệng": L.CS, "chăm sóc da mặt": L.CS, "chăm sóc tóc": L.CS, "chăm sóc cơ thể": L.CS, "chăm sóc cá nhân khác": L.CS, "mẹ và bé": L.MB,
+      "vệ sinh nhà cửa": L.GG, "đồ dùng nhà bếp": L.GD, "đồ dùng phòng tắm": L.GD, "đồ dùng gia đình khác": L.GD,
+      "no brand: ăn liền, gia vị": L.KHO, "no brand: bánh kẹo": L.BK, "no brand: đồ uống": L.DU, "no brand: đông lạnh": L.DM, "no brand: chăm sóc cá nhân": L.CS, "no brand: nhà cửa": L.GG,
+      "hàng hàn: thực phẩm": L.KHO, "hàng hàn: chăm sóc cá nhân": L.CS, "hàng hàn: nhà cửa": L.GG },
   };
   return {
     // [ngành lớn, nhóm] của ngành thuộc chuỗi khác BHX: nhóm = ngành lớn của chuỗi đó

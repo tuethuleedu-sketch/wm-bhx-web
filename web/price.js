@@ -18,7 +18,9 @@ window.WMPrice = (function () {
   // Nơi lấy giá: Thành thị giữ đúng tên tỉnh (khớp dữ liệu cũ), Nông thôn thêm " · Nông thôn".
   // Chuỗi khác BHX thêm mã chuỗi ở đầu, ví dụ "KFM: Hồ Chí Minh". BHX giữ nguyên tên tỉnh để khớp dữ liệu cũ.
   const URBAN = "Thành thị", RURAL = "Nông thôn", SUFFIX = " · " + RURAL;
-  const CHAINS = { BHX: "Bách Hóa Xanh", COOP: "Co.opmart / Co.op Food", GO: "GO! / Big C / Tops", KFM: "Kingfoodmart", LOTTE: "LOTTE Mart" };
+  const CHAINS = { BHX: "Bách Hóa Xanh", COOP: "Co.op Online", EMART: "Emart", GO: "GO! / Big C / Tops", KFM: "Kingfoodmart", LOTTE: "LOTTE Mart" };
+  const CFG_CHAINS = ["BHX", "LOTTE", "KFM", "COOP", "EMART"];   // chuỗi lấy được giá
+  const EMART_STORES = { pvt: "Emart Phan Văn Trị, Gò Vấp", sala: "Emart Sala, Thủ Đức", phi: "Emart Phan Huy Ích, Gò Vấp" };
   const CHAIN_RE = /^([A-Z]{2,8}): /;
   const chainOf = (loc) => { const m = CHAIN_RE.exec(loc); return m ? m[1] : "BHX"; };
   const provOf = (loc) => { const s = loc.replace(CHAIN_RE, ""); return s.endsWith(SUFFIX) ? s.slice(0, -SUFFIX.length) : s; };
@@ -592,13 +594,43 @@ window.WMPrice = (function () {
     $("#p-job").textContent = `${STATUS[j.status] || j.status}${j.status === "running" && j.tinh ? ` ${j.tinh}` : ""}${j.status === "done" ? "." : ":"}${j.status === "done" ? sum : part}${j.msg ? " " + j.msg : ""}`;
   }
   const warnLeave = (e) => { e.preventDefault(); e.returnValue = ""; };
+  // GitHub lấy giá LOTTE, Kingfoodmart, Co.op, Emart (nhanh, không cần giữ tab). BHX vẫn lấy ở trang này.
+  // Phạm vi → [chuỗi cho GitHub ("" = cả 4, null = không chạy GitHub), phạm vi cho trang này (null = không chạy)].
+  const GH_PLAN = { all: ["", "BHX"], LOTTE: ["lotte", null], KFM: ["kfm", null], COOP: ["coop", null], EMART: ["emart", null] };
+  const GH_STATE = { queued: "đang chờ máy", in_progress: "đang chạy", waiting: "đang chờ", requested: "đang chờ máy", pending: "đang chờ máy" };
+  const GH_DONE = { success: "đã xong", failure: "có lỗi", cancelled: "đã huỷ", timed_out: "quá thời gian" };
+  let ghWatch = 0;
+  function ghLine(text, url) { const el = $("#p-gh"); el.hidden = !text; el.innerHTML = text ? `Chuỗi khác (GitHub): ${esc(text)}${url ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">xem chi tiết</a>` : ""}` : ""; }
+  // Hỏi trạng thái mỗi 15 giây tới khi xong (tối đa 40 phút). Xong thì tải lại giá.
+  async function watchGh(since) {
+    const me = ++ghWatch, t0 = Date.now();
+    while (me === ghWatch && Date.now() - t0 < 40 * 60000) {
+      await new Promise((r) => setTimeout(r, 15000));
+      let s;
+      try { s = await API.ghStatus(); } catch (err) { ghLine(`chưa xem được trạng thái (${err.message})`); continue; }
+      const r = s.run;
+      if (!r || r.created < new Date(Date.parse(since) - 60000).toISOString()) { ghLine("đang chờ GitHub nhận lệnh…"); continue; }
+      const mins = Math.max(0, Math.round((Date.parse(r.updated) - Date.parse(r.created)) / 60000));
+      if (r.status !== "completed") { ghLine(`${GH_STATE[r.status] || r.status}, ${mins} phút`, r.url); continue; }
+      ghLine(`${GH_DONE[r.conclusion] || r.conclusion}${r.conclusion === "success" ? `, ${mins} phút. Đã tải lại giá.` : ". Bấm xem chi tiết để biết nơi nào lỗi."}`, r.url);
+      if (r.conclusion === "success" && !running) await reload();
+      return;
+    }
+  }
   async function runRefresh() {
     if (running) return;
     running = true; window.addEventListener("beforeunload", warnLeave); $("#p-admin").open = true;
     let job = null;
     try {
       showJob(null);
-      job = await API.priceStart($("#p-scope").value); showJob(job);
+      let scope = $("#p-scope").value;
+      const plan = GH_PLAN[scope], fresh = $("#p-refresh").textContent !== "Tiếp tục cập nhật";
+      if (plan && fresh && API.fbPrice && API.ghDispatch) {
+        try { const d = await API.ghDispatch(plan[0]); ghLine("đã gửi lệnh, đang chờ máy…"); watchGh(d.at); scope = plan[1]; }
+        catch (err) { ghLine(`chưa chạy được (${err.message}). Lấy luôn ở trang này.`); }   // không chạy được GitHub: lấy ở trang này như cũ
+      }
+      if (!scope) return;
+      job = await API.priceStart(scope); showJob(job);
       let fails = 0;
       while (job.status === "running" || job.status === "saving") {
         try { job = await API.priceStep(job.id); fails = 0; showJob(job); }
@@ -616,7 +648,7 @@ window.WMPrice = (function () {
     }
   }
   function cfgRow(p) {
-    return `<tr><td><select data-k="chain">${["BHX", "LOTTE", "KFM"].map((c) => opt(c, p.chain || "BHX", CHAINS[c])).join("")}</select></td><td><input data-k="tinh" maxlength="60" value="${esc(p.tinh)}"></td><td><select data-k="khu">${[URBAN, RURAL].map((k) => opt(k, p.khu || URBAN)).join("")}</select></td>${["provinceId", "wardId", "storeId"].map((k) => `<td><input data-k="${k}" inputmode="numeric" maxlength="12" value="${esc(p[k])}"></td>`).join("")}<td><input data-k="addr" maxlength="200" class="p-addr" value="${esc(p.addr || "")}" title="${esc(p.addr || "")}"></td><td><button class="link" data-del="1">Xoá</button></td></tr>`;
+    return `<tr><td><select data-k="chain">${CFG_CHAINS.map((c) => opt(c, p.chain || "BHX", CHAINS[c])).join("")}</select></td><td><input data-k="tinh" maxlength="60" value="${esc(p.tinh)}"></td><td><select data-k="khu">${[URBAN, RURAL].map((k) => opt(k, p.khu || URBAN)).join("")}</select></td>${["provinceId", "wardId", "storeId"].map((k) => `<td><input data-k="${k}" inputmode="numeric" maxlength="12" value="${esc(p[k])}"></td>`).join("")}<td><input data-k="addr" maxlength="200" class="p-addr" value="${esc(p.addr || "")}" title="${esc(p.addr || "")}"></td><td><button class="link" data-del="1">Xoá</button></td></tr>`;
   }
   function showConfig(c) {
     $("#t-p-cfg tbody").innerHTML = c.provinces.map(cfgRow).join("");
@@ -653,7 +685,7 @@ window.WMPrice = (function () {
       $("#p-cfg-auto").addEventListener("click", async () => {
         const msg = $("#p-cfg-msg"); msg.textContent = "Đang lấy danh sách tỉnh…";
         try {
-          // Giữ nguyên các dòng LOTTE, Kingfoodmart đang có; chỉ lập lại phần BHX.
+          // Giữ nguyên các dòng chuỗi khác (LOTTE, Kingfoodmart, Co.op, Emart) đang có; chỉ lập lại phần BHX.
           const others = [...document.querySelectorAll("#t-p-cfg tbody tr")].map((tr) => { const o = {}; tr.querySelectorAll("input,select").forEach((i) => (o[i.dataset.k] = i.value.trim())); return o; }).filter((r) => r.chain && r.chain !== "BHX");
           const list = (await API.priceAutoStores()).map((r) => ({ ...r, chain: "BHX" })).concat(others); $("#t-p-cfg tbody").innerHTML = list.map(cfgRow).join(""); const nt = list.filter((x) => x.khu === RURAL).length; msg.textContent = `Có ${new Set(list.map((x) => x.tinh)).size} tỉnh, ${list.length} cửa hàng (${list.length - nt} thành thị, ${nt} nông thôn). Xem lại địa chỉ rồi bấm Lưu thiết lập để dùng.`; }
         catch (err) { msg.textContent = err.message; }
@@ -672,12 +704,12 @@ window.WMPrice = (function () {
         b.disabled = false;
       });
     }
-    // Thêm LOTTE (mỗi tỉnh 1 siêu thị, gần cửa hàng BHX thành thị của tỉnh nhất) và Kingfoodmart (giá online, 1 nơi).
+    // Thêm LOTTE (mỗi tỉnh 1 siêu thị, gần cửa hàng BHX thành thị của tỉnh nhất), Kingfoodmart và Co.op Online (giá online, 1 nơi),
+    // Emart (1 siêu thị ở Hồ Chí Minh; đổi mã pvt/sala/phi để lấy siêu thị khác).
     $("#p-cfg-chains").addEventListener("click", () => {
       const msg = $("#p-cfg-msg"), rows = [...document.querySelectorAll("#t-p-cfg tbody tr")].map((tr) => { const o = {}; tr.querySelectorAll("input,select").forEach((i) => (o[i.dataset.k] = i.value.trim())); return o; });
       const have = new Set(rows.map((r) => (r.chain || "BHX") + "|" + r.tinh));
       const lotte = STORES.filter((s) => s.chain === "LOTTE" && /^[a-z]{2,6}$/.test(String(s.ma)));
-      if (!lotte.length) { msg.textContent = "Chưa có danh sách siêu thị LOTTE. Mở tab bản đồ một lần để tải danh sách cửa hàng rồi bấm lại."; return; }
       const bhxAt = (tinh) => { const r = rows.find((x) => (x.chain || "BHX") === "BHX" && x.tinh === tinh && x.khu !== RURAL); const s = r && STORES.find((b) => b.chain === "BHX" && String(b.ma) === String(r.storeId)); return s || null; };
       const d2 = (a, b) => (a.lat - b.lat) ** 2 + ((a.lng - b.lng) * Math.cos(a.lat * Math.PI / 180)) ** 2;
       const byT = new Map(); lotte.forEach((s) => { if (!byT.has(s.tinh)) byT.set(s.tinh, []); byT.get(s.tinh).push(s); });
@@ -690,8 +722,12 @@ window.WMPrice = (function () {
         add.push({ chain: "LOTTE", tinh, khu: URBAN, provinceId: "", wardId: "", storeId: String(pick.ma), addr: pick.dia_chi || "" });
       });
       if (!have.has("KFM|Hồ Chí Minh")) add.push({ chain: "KFM", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "online", addr: "Giá bán online của Kingfoodmart (cửa hàng mặc định của web)" });
+      if (!have.has("COOP|Hồ Chí Minh")) add.push({ chain: "COOP", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "online", addr: "Giá bán online của Co.op Online (kho mặc định của web)" });
+      if (!have.has("EMART|Hồ Chí Minh")) add.push({ chain: "EMART", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "pvt", addr: EMART_STORES.pvt + " (đổi mã thành sala hoặc phi để lấy siêu thị khác)" });
       $("#t-p-cfg tbody").insertAdjacentHTML("beforeend", add.map(cfgRow).join(""));
-      msg.textContent = add.length ? `Đã thêm ${add.filter((a) => a.chain === "LOTTE").length} siêu thị LOTTE và ${add.some((a) => a.chain === "KFM") ? 1 : 0} Kingfoodmart. Xem lại rồi bấm Lưu thiết lập.` : "LOTTE và Kingfoodmart đã có đủ trong thiết lập.";
+      const n = (c) => add.filter((a) => a.chain === c).length;
+      msg.textContent = (add.length ? `Đã thêm ${n("LOTTE")} siêu thị LOTTE, ${n("KFM")} Kingfoodmart, ${n("COOP")} Co.op Online, ${n("EMART")} Emart. Xem lại rồi bấm Lưu thiết lập.` : "Các chuỗi khác đã có đủ trong thiết lập.")
+        + (lotte.length ? "" : " Chưa có danh sách siêu thị LOTTE: mở tab bản đồ một lần rồi bấm lại để thêm LOTTE.");
     });
     $("#p-cfg-add").addEventListener("click", () => $("#t-p-cfg tbody").insertAdjacentHTML("beforeend", cfgRow({ tinh: "", provinceId: "", wardId: "", storeId: "" })));
     $("#t-p-cfg").addEventListener("click", (e) => { if (e.target.dataset.del) e.target.closest("tr").remove(); });

@@ -13,7 +13,7 @@
   // Cấu hình web của Firebase là mã định danh công khai; dữ liệu được bảo vệ bằng đăng nhập và quy tắc Firestore.
   const FB = { apiKey: "AIzaSyBXVRExNrdhPRpgQxCjYFcmhCbryMvZ9yw", authDomain: "bhx-map.firebaseapp.com", projectId: "bhx-map", storageBucket: "bhx-map.firebasestorage.app", messagingSenderId: "572165460587", appId: "1:572165460587:web:35760ee5273541eb05172e" };
   const SDK = "https://www.gstatic.com/firebasejs/11.10.0/", SESSION_DAYS = 7, DOC_MAX = 1000000, SHARDS = 8;
-  const BHX_URL = "https://api.bachhoaxanh.com/gw/Category/AjaxProduct", PAGE = 50, DELAY = 300, RETRY = 3, STEP_MS = 6000, JOB = "wmbhx_price_job";
+  const BHX_URL = "https://api.bachhoaxanh.com/gw/Category/AjaxProduct", PAGE = 50, DELAY = 300, RETRY = 3, STEP_MS = 6000, BHX_PAR = 5, JOB = "wmbhx_price_job";
   const DEFAULT = [{ tinh: "Hồ Chí Minh", provinceId: "1027", wardId: "100675", storeId: "6834" }, { tinh: "Hà Nội", provinceId: "1000", wardId: "103282", storeId: "30964" }, { tinh: "Cần Thơ", provinceId: "1032", wardId: "100166", storeId: "14387" }];
   const CATS = [10338, 10340, 11238, 2282, 2286, 2289, 2382, 2385, 2386, 2387, 2388, 2403, 2443, 2444, 2446, 2463, 2464, 2465, 2483, 2484, 2485, 2486, 2490, 2491, 2493, 2504, 2507, 2510, 2511, 2513, 2516, 2517, 2519, 2524, 2526, 2530, 2563, 2564, 2565, 2566, 2567, 2683, 2687, 2787, 2803, 2804, 2806, 2809, 2883, 2903, 2943, 2944, 2947, 2965, 3003, 3004, 3023, 3027, 3028, 3063, 3104, 3124, 3187, 3188, 3226, 3233, 3234, 3235, 3237, 3238, 3265, 3345, 3357, 3358, 3359, 3360, 3361, 3362, 3364, 3365, 3368, 3465, 3485, 3487, 3507, 3525, 3708, 3727, 3728, 3732, 3740, 4326, 4352, 4585, 4888, 4929, 5226, 5436, 56, 5872, 6553, 6562, 6597, 6653, 6658, 7068, 7082, 7083, 7086, 7143, 7162, 7170, 7171, 7199, 7259, 7459, 7462, 7478, 7480, 7558, 7579, 7618, 7622, 7694, 7779, 8139, 8158, 8159, 8160, 8163, 8271, 8275, 8285, 8286, 8318, 8320, 8338, 8400, 8638, 8678, 8779, 8781, 8782, 8783, 8785, 8788, 8790, 8820, 8938, 8966, 9027, 9081, 9498];
 
@@ -246,19 +246,67 @@
   const pack = (v) => { const s = JSON.stringify(v); if (new Blob([s]).size > DOC_MAX) throw new Error("Dữ liệu vượt giới hạn 1 MB của một tài liệu Firestore."); return s; };
   const today = () => new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
   const metaRef = () => db.collection("price").doc("meta");
+  const extRef = () => db.collection("price").doc("runs_ext");   // các lần lấy giá do GitHub ghi
   async function readMeta() { const d = await metaRef().get(); return d.exists ? d.data() : {}; }
   const metaRuns = (m) => (m.runs ? JSON.parse(m.runs) : []);
   // Mỗi tỉnh tối đa 2 cửa hàng: Thành thị và Nông thôn. Giá lưu theo "nơi lấy giá": Thành thị giữ tên tỉnh (khớp dữ liệu cũ), Nông thôn thêm " · Nông thôn".
   const URBAN = "Thành thị", RURAL = "Nông thôn";
   // Chuỗi khác BHX: tên nơi lấy giá có mã chuỗi ở đầu, ví dụ "LOTTE: Hồ Chí Minh".
-  const chainOf = (p) => (p.chain === "LOTTE" || p.chain === "KFM" ? p.chain : "BHX");
+  const OTHER_CHAINS = ["LOTTE", "KFM", "COOP", "EMART"];
+  const chainOf = (p) => (OTHER_CHAINS.includes(p.chain) ? p.chain : "BHX");
   const locName = (p) => (chainOf(p) === "BHX" ? "" : chainOf(p) + ": ") + (p.khu === RURAL ? `${p.tinh} · ${RURAL}` : p.tinh);
   const metaProvinces = (m) => (m.provinces ? JSON.parse(m.provinces) : DEFAULT).map((p) => ({ ...p, khu: p.khu === RURAL ? RURAL : URBAN }));
-  async function readCur(tinh) { const d = await db.collection("price_cur").doc(slug(tinh)).get(); return d.exists ? d.data() : null; }
+  // Nơi lấy giá có nhiều SKU (LOTTE, Co.op…) vượt 1 MB một tài liệu: chia thành nhiều phần "<key>~1", "<key>~2"…
+  // Phần đầu giữ ngày, số phần; các phần sau chỉ có tinh, store, items (getPrices đọc cả bộ sưu tập nên tự gộp).
+  const PART_BYTES = 800000, CHAIN_SHARD_BYTES = 700000;
+  const bytes = (s) => new Blob([s]).size;
+  async function readCur(tinh) {
+    const key = slug(tinh), d = await db.collection("price_cur").doc(key).get();
+    if (!d.exists) return null;
+    const c = d.data(), n = c.parts || 1;
+    if (n > 1) {
+      const items = JSON.parse(c.items), more = await Promise.all(Array.from({ length: n - 1 }, (_, k) => db.collection("price_cur").doc(`${key}~${k + 1}`).get()));
+      more.forEach((x) => { if (x.exists) items.push(...JSON.parse(x.data().items)); });
+      c.items = JSON.stringify(items);
+    }
+    return c;
+  }
+  // Chia danh sách thành các phần, mỗi phần dưới giới hạn byte.
+  function split(list, limit) {
+    const parts = [[]]; let size = 2;
+    list.forEach((a) => { const s = bytes(JSON.stringify(a)) + 1; if (size + s > limit && parts[parts.length - 1].length) { parts.push([]); size = 2; } parts[parts.length - 1].push(a); size += s; });
+    return parts;
+  }
+  function writeCur(batch, key, head, items, oldParts) {
+    const parts = split(items, PART_BYTES), col = db.collection("price_cur");
+    batch.set(col.doc(key), { ...head, items: pack(parts[0]), parts: parts.length });
+    parts.slice(1).forEach((p, k) => batch.set(col.doc(`${key}~${k + 1}`), { tinh: head.tinh, store: head.store, latest: head.latest, items: pack(p), part: k + 1 }));
+    for (let k = parts.length; k < (oldParts || 1); k++) batch.delete(col.doc(`${key}~${k}`));
+  }
+  // Tên SKU: BHX ở s0..s7 như cũ. Mỗi chuỗi khác có bộ riêng "c_<CHUỖI>_<k>", số phần tự tăng theo dung lượng,
+  // để web (BHX) và GitHub (chuỗi khác) chạy cùng lúc không ghi đè lên nhau.
+  const skuChain = (id) => { const m = /^([A-Z]+):/.exec(id); return m && OTHER_CHAINS.includes(m[1]) ? m[1] : "BHX"; };
+  const hashOf = (id) => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
   async function readShards() {
-    const docs = await Promise.all(Array.from({ length: SHARDS }, (_, k) => db.collection("price_skus").doc("s" + k).get()));
-    const out = {}; docs.forEach((d, k) => (out["s" + k] = d.exists ? JSON.parse(d.data().json) : {}));
+    const snap = await db.collection("price_skus").get(), out = { chain: {}, chainDocs: {} };
+    for (let k = 0; k < SHARDS; k++) out["s" + k] = {};
+    snap.docs.forEach((d) => {
+      const m = /^c_([A-Z]+)_\d+$/.exec(d.id), j = JSON.parse(d.data().json || "{}");
+      if (m) { Object.assign((out.chain[m[1]] = out.chain[m[1]] || {}), j); (out.chainDocs[m[1]] = out.chainDocs[m[1]] || []).push(d.id); }
+      else if (/^s\d+$/.test(d.id)) out[d.id] = j;
+    });
     return out;
+  }
+  const skuMap = (skus, id) => { const c = skuChain(id); return c === "BHX" ? skus[shardOf(id)] : (skus.chain[c] = skus.chain[c] || {}); };
+  // Ghi tên SKU: chuỗi khác BHX thì chỉ ghi bộ của chuỗi đó, chia số phần theo dung lượng, xoá phần thừa.
+  function writeSkus(batch, skus, chain) {
+    const col = db.collection("price_skus");
+    if (chain === "BHX") { for (let k = 0; k < SHARDS; k++) batch.set(col.doc("s" + k), { json: pack(skus["s" + k]) }); return; }
+    const all = skus.chain[chain] || {}, n = Math.max(1, Math.ceil(bytes(JSON.stringify(all)) / CHAIN_SHARD_BYTES)), parts = Array.from({ length: n }, () => ({}));
+    Object.entries(all).forEach(([id, a]) => (parts[hashOf(id) % n][id] = a));
+    const ids = parts.map((p, k) => { batch.set(col.doc(`c_${chain}_${k}`), { json: pack(p), n }); return `c_${chain}_${k}`; });
+    (skus.chainDocs[chain] || []).filter((d) => !ids.includes(d)).forEach((d) => batch.delete(col.doc(d)));
+    skus.chainDocs[chain] = ids;
   }
   const toItem = (a) => ({ id: a[0], final: a[1], base: a[2], off: a[3], promo: !!a[4], title: a[5], can: !!a[6], first_seen: a[7], last_seen: a[8] });
   const fromRow = (r, first, date) => [r.id, r.final, r.base, Math.round(r.off * 10000) / 10000, r.promo ? 1 : 0, r.title, r.can === false ? 0 : 1, first, date];
@@ -283,17 +331,17 @@
       if (!o) s.added++; else if (o[1] && r.final > o[1]) s.up++; else if (o[1] && r.final < o[1]) s.down++;
       if (!o || o[1] !== r.final || o[2] !== r.base) hist.push([r.id, r.final, r.base]);
       items.push(fromRow(r, o ? o[7] : date, date));
-      const shard = skus[shardOf(r.id)];
-      shard[r.id] = [r.code, r.name, r.cat, r.brand, r.unit, r.url, r.grp || ""];
+      skuMap(skus, r.id)[r.id] = [r.code, r.name, r.cat, r.brand, r.unit, r.url, r.grp || ""];
     });
     const histRef = db.collection("price_hist").doc(`${key}_${date}`), histOld = await histRef.get();
     if (histOld.exists) { const add = new Set(hist.map((h) => h[0])); JSON.parse(histOld.data().rows).forEach((h) => { if (!add.has(h[0])) hist.push(h); }); }
     const m = await readMeta(), runs = metaRuns(m).concat([{ date, at: new Date().toISOString(), tinh, store, ...(addr ? { addr: String(addr).slice(0, 200) } : {}), file, by: auth.currentUser.email, n: rows.length, oos: rows.filter((r) => r.can === false).length, added: s.added, gone: s.gone, up: s.up, down: s.down }]).slice(-1500);
     const batch = db.batch();
-    batch.set(db.collection("price_cur").doc(key), { tinh, store, latest: date, items: pack(items), dates: JSON.stringify(dates.concat(date).slice(-60)) });
+    writeCur(batch, key, { tinh, store, latest: date, dates: JSON.stringify(dates.concat(date).slice(-60)) }, items, cur && cur.parts);
     batch.set(histRef, { tinh, date, rows: pack(hist) });
     batch.set(metaRef(), { runs: pack(runs) }, { merge: true });
-    Object.keys(skus).forEach((k) => batch.set(db.collection("price_skus").doc(k), { json: pack(skus[k]) }));
+    // Chỉ ghi tên SKU của chuỗi đang lưu (các SKU khác đã có thì giữ nguyên).
+    [...new Set(rows.map((r) => skuChain(r.id)))].forEach((c) => writeSkus(batch, skus, c));
     await batch.commit();
     return s;
   }
@@ -331,7 +379,8 @@
   const LOTTE_API = "https://www.lottemart.vn/v1/p/mart/es/vi_", LOTTE_SIZE = 1000;
   // Ngành lớn của LOTTE có bán ở BHX/WM (bỏ điện gia dụng, thú cưng, thời trang, thể thao).
   const LOTTE_CATS = [3, 266, 495, 285, 303, 167, 506, 200, 186, 161, 143, 231, 111, 140, 226, 122, 261, 314, 516, 325, 351, 369];
-  const CHAIN_NAME = { BHX: "BHX", LOTTE: "LOTTE", KFM: "Kingfoodmart" };
+  const CHAIN_NAME = { BHX: "BHX", LOTTE: "LOTTE", KFM: "Kingfoodmart", COOP: "Co.op Online", EMART: "Emart" };
+  const EMART_STORES = ["pvt", "sala", "phi"];
   async function lottePage(store, cat, page) {
     let last = "";
     for (let a = 0; a < RETRY; a++) {
@@ -372,14 +421,18 @@
     return out;
   }
   // Kingfoodmart: web không cho trình duyệt ở trang khác gọi thẳng, nên Apps Script lấy hộ từng trang (không ghi gì vào Sheet).
-  let kfmCats = null;
+  // Co.op Online và Emart cũng vậy: Apps Script lấy hộ (Co.op theo trang 1.000 SKU, Emart mỗi lần 1 ngành của 1 siêu thị).
+  let kfmCats = null, coopCats = null, emartCats = null;
   async function catsFor(p) {
     const c = chainOf(p);
     if (c === "LOTTE") return lotteLeaves(p.storeId);
     if (c === "KFM") { if (!kfmCats) kfmCats = (await gas.kfmPricePage("", 1)).cats.map((x) => x.slug); return kfmCats; }
+    if (c === "COOP") { if (!coopCats) coopCats = (await gas.coopPricePage("", 1)).cats.map((x) => x.slug); return coopCats; }
+    if (c === "EMART") { if (!emartCats) emartCats = (await gas.emartPricePage(p.storeId, "")).cats.map((x) => x.id); return emartCats; }
     return CATS;
   }
-  const catsLen = (p) => (chainOf(p) === "LOTTE" ? (lotteTree.get(p.storeId) || { length: 90 }).length : chainOf(p) === "KFM" ? (kfmCats ? kfmCats.length : 15) : CATS.length);
+  const catsLen = (p) => { const c = chainOf(p);
+    return c === "LOTTE" ? (lotteTree.get(p.storeId) || { length: 90 }).length : c === "KFM" ? (kfmCats ? kfmCats.length : 15) : c === "COOP" ? (coopCats ? coopCats.length : 11) : c === "EMART" ? (emartCats ? emartCats.length : 38) : CATS.length; };
   const SRC = {
     BHX: { page: async (p, cat, page) => { const l = await bhxPage(p, cat, page); return { rows: l.map((x) => rowOf(x, p)), more: l.length === PAGE }; } },
     LOTTE: { page: async (p, cat, page) => {
@@ -387,6 +440,8 @@
       return { rows: l.map(lotteRow), more: false, expand: deeper };   // chạm 1.000 SKU: lấy thêm các ngành con của ngành này
     } },
     KFM: { page: async (p, slug, page) => { const d = await gas.kfmPricePage(slug, page + 1); return { rows: d.items, more: d.page < d.last }; } },
+    COOP: { page: async (p, slug, page) => { const d = await gas.coopPricePage(slug, page + 1); return { rows: d.items, more: d.page < d.last }; } },
+    EMART: { page: async (p, cat) => { const d = await gas.emartPricePage(p.storeId, cat); return { rows: d.items, more: false }; } },
   };
 
   let job = null, buf = null, shards = null;
@@ -410,11 +465,15 @@
     fbPrice: true,
     async getPrices() {
       await ready();
-      const [m, curSnap, skus] = await Promise.all([readMeta(), db.collection("price_cur").get(), readShards()]);
+      const [m, ext, curSnap, skus] = await Promise.all([readMeta(), extRef().get(), db.collection("price_cur").get(), readShards()]);
       const skuList = [], items = [];
-      Object.values(skus).forEach((sh) => Object.entries(sh).forEach(([id, a]) => skuList.push({ id, code: a[0], name: a[1], cat: a[2], brand: a[3], unit: a[4], url: a[5], grp: a[6] || "" })));
+      const listOf = (sh) => Object.entries(sh).forEach(([id, a]) => skuList.push({ id, code: a[0], name: a[1], cat: a[2], brand: a[3], unit: a[4], url: a[5], grp: a[6] || "" }));
+      for (let k = 0; k < SHARDS; k++) listOf(skus["s" + k]);
+      Object.values(skus.chain).forEach(listOf);
       curSnap.docs.forEach((d) => { const c = d.data(); JSON.parse(c.items).forEach((a) => items.push({ ...toItem(a), tinh: c.tinh, store: c.store })); });
-      return { skus: skuList, items, runs: metaRuns(m), hist: [], regions: m.regions ? JSON.parse(m.regions) : null };
+      // Lần lấy giá do GitHub ghi nằm ở price/runs_ext; gộp chung, xếp theo thời gian.
+      const runs = metaRuns(m).concat(ext.exists ? JSON.parse(ext.data().runs || "[]") : []).sort((a, b) => (a.date + a.at < b.date + b.at ? -1 : 1));
+      return { skus: skuList, items, runs, hist: [], regions: m.regions ? JSON.parse(m.regions) : null };
     },
     // Chép lịch sử giá đã lưu ở bản Apps Script (Google Sheet) sang Firestore. Chạy lại nhiều lần cũng không nhân đôi:
     // ngày nào Firestore đã có thì giữ bản Firestore, SKU đã có thì chỉ lùi ngày xuất hiện đầu tiên, lần tải trùng thì bỏ.
@@ -423,7 +482,7 @@
       const g = await gas.getPrices();
       if (!g.items.length && !g.hist.length) return { provinces: [], dates: 0 };
       const skus = await readShards(), m = await readMeta(), out = [];
-      g.skus.forEach((s) => { const sh = skus[shardOf(s.id)]; if (!sh[s.id]) sh[s.id] = [s.code, s.name, s.cat, s.brand, s.unit, s.url]; });
+      g.skus.forEach((s) => { const sh = skuMap(skus, s.id); if (!sh[s.id]) sh[s.id] = [s.code, s.name, s.cat, s.brand, s.unit, s.url]; });
       const tinhs = [...new Set(g.items.map((x) => x.tinh).concat(g.hist.map((h) => h[1])))].filter(Boolean);
       for (const tinh of tinhs) {
         const key = slug(tinh), cur = await readCur(tinh);
@@ -448,7 +507,7 @@
       const seen = new Set(metaRuns(m).map((r) => r.date + "|" + r.tinh + "|" + r.at));
       const runs = g.runs.filter((r) => !seen.has(r.date + "|" + r.tinh + "|" + r.at)).concat(metaRuns(m)).sort((a, b) => (a.date + a.at < b.date + b.at ? -1 : 1)).slice(-1500);
       const batch = db.batch();
-      Object.keys(skus).forEach((k) => batch.set(db.collection("price_skus").doc(k), { json: pack(skus[k]) }));
+      [...new Set(g.skus.map((s) => skuChain(s.id)).concat("BHX"))].forEach((c) => writeSkus(batch, skus, c));
       batch.set(metaRef(), { runs: pack(runs), imported: new Date().toISOString() }, { merge: true });
       await batch.commit();
       return { provinces: out, dates: out.reduce((a, p) => a + p.dates, 0) };
@@ -490,7 +549,8 @@
         if (!o.tinh) throw new Error("Thiếu tên tỉnh"); if (seen.has(locName(o))) throw new Error("Trùng tỉnh và khu vực: " + locName(o)); seen.add(locName(o));
         if (o.chain === "BHX") ["provinceId", "wardId", "storeId"].forEach((k) => { if (!/^\d{1,12}$/.test(o[k])) throw new Error(`${locName(o)}: ${k} phải là số`); });
         else if (o.chain === "LOTTE" && !/^[a-z]{2,6}$/.test(o.storeId)) throw new Error(`${locName(o)}: mã siêu thị LOTTE là 2–6 chữ thường, ví dụ nsg`);
-        else if (o.chain === "KFM") o.storeId = "online";
+        else if (o.chain === "KFM" || o.chain === "COOP") o.storeId = "online";
+        else if (o.chain === "EMART" && !EMART_STORES.includes(o.storeId)) throw new Error(`${locName(o)}: mã siêu thị Emart là pvt, sala hoặc phi`);
         return o;
       });
       await metaRef().set({ provinces: pack(clean) }, { merge: true });
@@ -519,9 +579,9 @@
       }
       buf = null; shards = null;
       // urban/rural: chỉ cửa hàng BHX thành thị/nông thôn; BHX, LOTTE, KFM: chỉ chuỗi đó; all: tất cả.
-      const all = metaProvinces(await readMeta()), list = all.filter((p) => scope === "urban" ? chainOf(p) === "BHX" && p.khu !== RURAL : scope === "rural" ? chainOf(p) === "BHX" && p.khu === RURAL : ["BHX", "LOTTE", "KFM"].includes(scope) ? chainOf(p) === scope : true);
-      if (!list.length) throw new Error(scope === "rural" ? "Chưa có cửa hàng Nông thôn nào trong thiết lập. Bấm Lấy đủ các tỉnh có BHX rồi Lưu thiết lập." : ["LOTTE", "KFM"].includes(scope) ? "Chưa có cửa hàng của chuỗi này trong thiết lập. Bấm Thêm LOTTE và Kingfoodmart rồi Lưu thiết lập." : "Chưa có tỉnh nào trong thiết lập.");
-      kfmCats = null;
+      const all = metaProvinces(await readMeta()), list = all.filter((p) => scope === "urban" ? chainOf(p) === "BHX" && p.khu !== RURAL : scope === "rural" ? chainOf(p) === "BHX" && p.khu === RURAL : ["BHX"].concat(OTHER_CHAINS).includes(scope) ? chainOf(p) === scope : true);
+      if (!list.length) throw new Error(scope === "rural" ? "Chưa có cửa hàng Nông thôn nào trong thiết lập. Bấm Lấy đủ các tỉnh có BHX rồi Lưu thiết lập." : OTHER_CHAINS.includes(scope) ? "Chưa có cửa hàng của chuỗi này trong thiết lập. Bấm Thêm các chuỗi khác rồi Lưu thiết lập." : "Chưa có tỉnh nào trong thiết lập.");
+      kfmCats = null; coopCats = null; emartCats = null;
       job = { id: String(Date.now()), status: "running", date: today(), scope: scope || "all", provinces: list, pi: 0, ci: 0, page: 0, rows: 0, msg: "", summary: { date: today(), provinces: [] } };
       saveJob();
       return out(job);
@@ -534,6 +594,20 @@
       let cats;
       try {
         cats = await catsFor(p);
+        // BHX: lấy cùng lúc BHX_PAR ngành, mỗi ngành lấy hết các trang (đo thử: 1 cửa hàng khoảng 2 phút thay vì 6–8 phút).
+        if (chainOf(p) === "BHX" && job.page === 0) {
+          while (Date.now() - t0 < STEP_MS && job.ci < cats.length) {
+            const batch = cats.slice(job.ci, job.ci + BHX_PAR);
+            const got = await Promise.all(batch.map(async (c) => {
+              const all = [];
+              for (let page = 0; page < 200; page++) { const r = await src.page(p, c, page); all.push(...r.rows); if (!r.more || !r.rows.length) break; }
+              return all;
+            }));
+            got.forEach((rows) => buf.rows.push(...rows.filter((x) => x.id && x.name && !buf.seen.has(x.id) && buf.seen.add(x.id))));
+            job.ci += batch.length;
+            await sleep(DELAY);
+          }
+        }
         while (Date.now() - t0 < STEP_MS && job.ci < cats.length) {
           const r = await src.page(p, cats[job.ci], job.page);
           const fresh = r.rows.filter((x) => x.id && x.name && !buf.seen.has(x.id) && buf.seen.add(x.id));

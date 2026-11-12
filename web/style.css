@@ -12,6 +12,7 @@ h1 { margin: 0 0 8px; font-size: 22px; } h3 { margin: 0 0 10px; font-size: 15px;
 code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
 button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; padding: 6px 12px; }
 button.ghost { background: transparent; color: var(--accent); }
+a.btn-link { display: inline-block; border-radius: 6px; border: 1px solid var(--accent); color: var(--accent); padding: 6px 12px; text-decoration: none; }
 button.link { border: 0; background: none; color: var(--muted); padding: 0 0 0 8px; text-decoration: underline; }
 input, select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); }
 label.check { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); margin: 4px 0 10px; }
