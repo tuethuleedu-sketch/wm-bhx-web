@@ -29,6 +29,10 @@ window.fetch = async (url, o) => {
   if (url === "http://gas.test/exec") { const b = JSON.parse(o.body); window.__gasToken = b.token; if (b.action === "boot") { gasBoots++; return new Response(JSON.stringify({ data: { me: { email: "admin@gmail.com", role: meRole }, settings: { viewer_can_export: false }, snapshot: fakeSnap(), changes: [{ date: "2026-11-10", chain: "BHX", type: "open", ma: "9", dia_chi: "y", tinh: "Hà Nội", lat: 21, lng: 105.8 }] } })); }
     if (b.action === "kfmPricePage") { window.__kfm = (window.__kfm || 0) + 1; return new Response(JSON.stringify({ data: !b.slug ? { cats: [{ slug: "sua", name: "Sữa, bơ, phô mai" }] }
       : { page: b.page, last: 2, items: [{ id: "KFM:" + b.page, code: "893" + b.page, name: "Sữa K" + b.page, grp: "Sữa, bơ, phô mai", cat: "Sữa tươi", brand: "", unit: "Hộp", url: "", final: 9000, base: 10000, off: 0.1, title: "", can: b.page !== 2 }] } })); }
+    if (b.action === "coopPricePage") { window.__coop = (window.__coop || []).concat([b.slug + "#" + b.page]); return new Response(JSON.stringify({ data: !b.slug ? { cats: [{ slug: "thuc-uong" }, { slug: "sua" }] }
+      : { page: b.page, last: b.slug === "sua" ? 2 : 1, items: [{ id: "COOP:" + b.slug + b.page, code: "25" + b.page, name: "Co.op " + b.slug + b.page, grp: "Thức uống", cat: "Nước ngọt", brand: "Pepsi", unit: "Lon", url: "", final: 9000, base: 10000, off: 0.1, title: "", can: true }] } })); }
+    if (b.action === "emartPricePage") { window.__emart = (window.__emart || []).concat([b.store + "#" + b.cat]); return new Response(JSON.stringify({ data: b.cat === "" ? { cats: [{ id: 58, name: "Sữa" }, { id: 62, name: "Đồ uống" }], name: "Emart" }
+      : { items: [{ id: "EMART:" + b.cat, code: "880" + b.cat, name: "Emart " + b.cat, grp: b.cat === 58 ? "Sữa" : "Đồ uống", cat: "Sữa", brand: "", unit: "", url: "", final: 29800, base: 35000, off: 0.15, title: "Mua 2 tính tiền 1", can: b.cat !== 62 }] } })); }
     if (b.action === "prices") return new Response(JSON.stringify({ data: { skus: [{ id: "g1", code: "c1", name: "SP cũ", cat: "Sữa tươi", brand: "TH", unit: "Hộp", url: "" }],
       items: [{ tinh: "Hà Nội", store: "3", id: "g1", final: 9000, base: 10000, off: 0.1, promo: true, title: "", can: true, first_seen: "2026-10-01", last_seen: "2026-10-08" }, { tinh: "Hà Nội", store: "3", id: "10338000", final: 1, base: 2, off: 0.5, promo: true, title: "", can: true, first_seen: "2026-09-01", last_seen: "2026-10-08" }],
       runs: [{ date: "2026-10-01", at: "a1", tinh: "Hà Nội", store: "3", file: "f", by: "x", n: 2 }, { date: "2026-10-08", at: "a2", tinh: "Hà Nội", store: "3", file: "f", by: "x", n: 2 }],
@@ -47,6 +51,8 @@ window.fetch = async (url, o) => {
   }
   if (/AjaxProduct/.test(url)) {
     bhxCalls++; const b = JSON.parse(o.body); sizesSeen.add(b.PageSize);
+    window.__bhxNow = (window.__bhxNow || 0) + 1; window.__bhxMax = Math.max(window.__bhxMax || 0, window.__bhxNow);
+    await new Promise((r) => setTimeout(r, 2)); window.__bhxNow--;
     if (bhxMode === "403") return new Response("{}", { status: 403 });
     if (bhxMode === "none") return new Response(JSON.stringify({ data: { products: [] } }));
     if (bhxMode === "few" && b.CategoryId !== 10338) return new Response(JSON.stringify({ data: { products: [] } }));
@@ -58,6 +64,7 @@ window.fetch = async (url, o) => {
 };
 const realST = window.setTimeout; window.setTimeout = (f, ms, ...a) => realST(f, ms > 50 ? 0 : ms, ...a);   // bỏ thời gian chờ để test chạy nhanh
 </script>
+<script src="/web/cat-tree.js"></script>
 <script src="/web/gas-api.js"></script>
 <script src="/web/firebase-api.js"></script>
 <script>
@@ -121,6 +128,7 @@ const realST = window.setTimeout; window.setTimeout = (f, ms, ...a) => realST(f,
   writes = 0; bhxCalls = 0;
   let j = await run();
   check("lấy đủ 2 tỉnh, dùng 50 SKU mỗi trang", j.status === "done" && j.summary.provinces.length === 2 && j.summary.provinces[0].rows === 110 && sizesSeen.has(50) && sizesSeen.size === 1, j);
+  check("BHX lấy nhiều ngành cùng lúc (tối đa 5)", window.__bhxMax >= 2 && window.__bhxMax <= 5, window.__bhxMax);
   check("mỗi tỉnh chỉ tốn ít lượt ghi (tỉnh + lịch sử + meta + 8 nhóm SKU)", writes === 22, writes);
   const d0 = new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
   check("lưu theo tỉnh, không có mảng lồng", typeof store.get("price_cur/ha_noi").items === "string" && store.get("price_cur/can_tho").tinh === "Cần Thơ");
@@ -186,6 +194,32 @@ const realST = window.setTimeout; window.setTimeout = (f, ms, ...a) => realST(f,
   check("Kingfoodmart: lấy qua Apps Script đủ các trang, lưu riêng", j.status === "done" && j.summary.provinces[0].tinh === "KFM: Hồ Chí Minh" && kfItems.length === 2 && window.__kfm === 3, { s: j.summary, calls: window.__kfm, n: kfItems.length });
   check("Kingfoodmart: SKU hết hàng được ghi nhận", kfItems.some((a) => a[0] === "KFM:2" && a[6] === 0) && kfItems.some((a) => a[0] === "KFM:1" && a[6] === 1));
   check("lấy chuỗi khác không đụng giá BHX", store.get("price_cur/ha_noi").tinh === "Hà Nội");
+  await A.priceCancel();
+  // ---- Co.op Online và Emart (qua Apps Script) ----
+  check("mã siêu thị Emart sai → lỗi", /mã siêu thị Emart/.test(await err(() => A.savePriceConfig([{ chain: "EMART", tinh: "Hồ Chí Minh", storeId: "abc" }]))));
+  await A.savePriceConfig([{ tinh: "Hà Nội", provinceId: "1", wardId: "2", storeId: "3" }, { chain: "COOP", tinh: "Hồ Chí Minh", storeId: "x" }, { chain: "EMART", tinh: "Hồ Chí Minh", storeId: "sala" }]);
+  const cfgE = (await A.priceConfig()).provinces;
+  check("thiết lập Co.op luôn là giá online, Emart giữ mã siêu thị", cfgE[1].chain === "COOP" && cfgE[1].storeId === "online" && cfgE[2].chain === "EMART" && cfgE[2].storeId === "sala", cfgE);
+  window.__coop = []; j = await runScope("COOP");
+  const co = store.get("price_cur/coop_ho_chi_minh"), coItems = co ? JSON.parse(co.items) : [];
+  check("Co.op: lấy đủ các ngành và các trang, lưu riêng", j.status === "done" && j.summary.provinces.length === 1 && j.summary.provinces[0].tinh === "COOP: Hồ Chí Minh" && coItems.length === 3 && window.__coop.join() === "#1,thuc-uong#1,sua#1,sua#2", { s: j.summary, calls: window.__coop });
+  window.__emart = []; j = await runScope("EMART");
+  const em = store.get("price_cur/emart_ho_chi_minh"), emItems = em ? JSON.parse(em.items) : [];
+  check("Emart: mỗi ngành 1 lần gọi đúng siêu thị, lưu riêng", j.status === "done" && j.summary.provinces[0].tinh === "EMART: Hồ Chí Minh" && emItems.length === 2 && window.__emart.join() === "sala#,sala#58,sala#62" && em.store === "sala", { s: j.summary, calls: window.__emart });
+  check("Emart: giá giảm, chương trình, hết hàng", emItems.some((a) => a[0] === "EMART:58" && a[1] === 29800 && a[2] === 35000 && a[5] === "Mua 2 tính tiền 1" && a[6] === 1) && emItems.some((a) => a[0] === "EMART:62" && a[6] === 0), emItems);
+  p = await A.getPrices();
+  check("Co.op, Emart: tên SKU và nhóm ngành lưu đủ", p.skus.some((s) => s.id === "COOP:thuc-uong1" && s.grp === "Thức uống" && s.brand === "Pepsi") && p.skus.some((s) => s.id === "EMART:58" && s.grp === "Sữa"));
+  check("tên SKU chuỗi khác lưu bộ riêng c_<CHUỖI>_k, không lẫn vào bộ BHX", !!store.get("price_skus/c_COOP_0") && !!store.get("price_skus/c_EMART_0") && !!store.get("price_skus/c_KFM_0") && !!store.get("price_skus/c_LOTTE_0")
+    && [0, 1, 2, 3, 4, 5, 6, 7].every((k) => !Object.keys(JSON.parse((store.get("price_skus/s" + k) || { json: "{}" }).json)).some((id) => /^(COOP|EMART|KFM|LOTTE):/.test(id))));
+  // Dữ liệu GitHub ghi: nơi lấy giá chia 2 phần, lần lấy giá ở price/runs_ext
+  store.set("price_cur/lotte_da_nang", { tinh: "LOTTE: Đà Nẵng", store: "dng", latest: "2026-11-12", parts: 2, dates: '["2026-11-12"]', items: JSON.stringify([["LOTTE:9001", 5000, 6000, 0.1667, 1, "", 1, "2026-11-12", "2026-11-12"]]) });
+  store.set("price_cur/lotte_da_nang~1", { tinh: "LOTTE: Đà Nẵng", store: "dng", latest: "2026-11-12", part: 1, items: JSON.stringify([["LOTTE:9002", 7000, 7000, 0, 0, "", 0, "2026-11-12", "2026-11-12"]]) });
+  store.set("price_skus/c_LOTTE_1", { n: 2, json: JSON.stringify({ "LOTTE:9001": ["893", "SP GitHub", "Sữa", "", "", "", "Chế Phẩm Từ Sữa"] }) });
+  store.set("price/runs_ext", { runs: JSON.stringify([{ date: "2026-11-12", at: "2026-11-12T01:00:00Z", tinh: "LOTTE: Đà Nẵng", store: "dng", file: "GitHub", by: "bot@x", n: 2 }]) });
+  p = await A.getPrices();
+  check("đọc dữ liệu GitHub: gộp các phần giá, tên SKU nhiều phần, lần lấy giá", p.items.filter((x) => x.tinh === "LOTTE: Đà Nẵng").length === 2 && p.skus.some((s) => s.id === "LOTTE:9001" && s.name === "SP GitHub")
+    && p.skus.some((s) => s.id === "LOTTE:501") && p.runs.some((r) => r.file === "GitHub" && r.tinh === "LOTTE: Đà Nẵng") && p.runs.some((r) => r.file !== "GitHub"), p.runs.slice(-3));
+  check("ngành của Co.op, Emart xếp vào ngành lớn chung", CatTree.ofGroup("COOP", "Thức uống")[0] === "Đồ uống" && CatTree.ofGroup("EMART", "No Brand: bánh kẹo")[0] === "Bánh kẹo, ăn vặt" && CatTree.ofGroup("EMART", "Sữa")[0] === "Sữa các loại");
   await A.priceCancel();
 
   // ---- Chép lịch sử từ bản Apps Script ----

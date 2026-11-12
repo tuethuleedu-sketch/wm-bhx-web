@@ -536,6 +536,57 @@
   check("Kingfoodmart: ngành lạ → lỗi rõ", /không tồn tại/.test(r.error), r);
   r = call("kfmPricePage", { token: viewer.token, slug: "" });
   check("Kingfoodmart: Viewer không gọi được", /Chỉ Admin/.test(r.error), r);
+  // ---- Giá Co.op Online (Teko) và Emart (trang HTML), Apps Script lấy hộ ----
+  let coopBody = null, emartUrls = [];
+  M.fetchHandler = (url, o) => {
+    if (/discovery\.tekoapis\.com/.test(url)) { coopBody = JSON.parse(o.payload); return { code: 200, body: { data: { total: 2500, products: [
+      { sku: "250100496", name: "Bí giống Mỹ", latestPrice: "21900", supplierRetailPrice: "25000", totalAvailable: 4, sellable: true, brandName: "Co.op Select", uomName: "Kg", canonical: "bi-giong-my--s250100496", categories: [{ name: "Rau củ, trái cây" }, { name: "Rau Củ" }, { name: "Củ" }] },
+      { sku: "2", name: "Hết hàng", latestPrice: "10000", supplierRetailPrice: "10000", totalAvailable: 0, sellable: true, canonical: "x y", categories: [{ name: "Thức uống" }] },
+      { sku: "3", name: "Không giá", latestPrice: "0", supplierRetailPrice: "0", totalAvailable: 1, categories: [] }] } } }; }
+    if (/emartmall\.com\.vn/.test(url)) { emartUrls.push(url); return { code: 200, body: '<html><div class="product-block desktop-pdt"><div class="image"><span class="sale-exist">15%</span><a class="img" href="https://sala.emartmall.com.vn/index.php?route=product/product&amp;path=58&amp;product_id=111773"><img src="https://x/image/cache/catalog/products/8936088900586/8936088900586-600x600.jpg"></a></div>'
+      + '<div class="product-meta"><div class="top"><div class="name"><a href="x?product_id=111773">S&#7919;a T&amp;H 1L</a></div><div class="price"> <span class="price-old">35,000₫</span> <span class="price-new">29,800₫</span> </div></div><div class="offer-block"><span class="offer">MUA 2 TÍNH TIỀN 1</span></div></div></div>'
+      + '<div class="product-block desktop-pdt"><a class="img" href="x?product_id=94213"><div class="shortage"><img src="/image/sp-tamhethang.png"></div></a><div class="product-meta"><div class="top"><div class="name"><a href="x?product_id=94213">Bánh ướt</a></div><div class="price"> 39,000₫ </div></div><div class="offer-block"> </div></div></div></html>' }; }
+    return { code: 404, body: {} };
+  };
+  r = adm("coopPricePage", { slug: "" });
+  check("Co.op: danh sách ngành lớn", r.ok && r.data.cats.length === 11 && r.data.cats[0].slug === "rau-cu-trai-cay", r);
+  r = adm("coopPricePage", { slug: "rau-cu-trai-cay", page: 9 });
+  const co0 = r.data && r.data.items[0], co1 = r.data && r.data.items[1];
+  check("Co.op: chuẩn hoá giá, ngành, hết hàng, bỏ SKU không giá, trang tối đa 5", r.ok && r.data.items.length === 2 && co0.id === "COOP:250100496" && co0.final === 21900 && co0.base === 25000 && Math.abs(co0.off - 0.124) < 1e-9 && co0.grp === "Rau củ, trái cây" && co0.cat === "Rau Củ" && co0.brand === "Co.op Select" && co0.url === "https://cooponline.vn/bi-giong-my--s250100496" && co0.can && !co1.can && co1.url === "" && r.data.last === 3 && r.data.page === 5 && coopBody.page === 5 && coopBody.pageSize === 1000 && coopBody.slug === "/c/rau-cu-trai-cay", { d: r.data, coopBody });
+  r = adm("coopPricePage", { slug: "khong-co", page: 1 });
+  check("Co.op: ngành lạ → lỗi rõ", /không tồn tại/.test(r.error), r);
+  r = adm("emartPricePage", { store: "sala", cat: "" });
+  check("Emart: danh sách ngành và tên siêu thị", r.ok && r.data.cats.length > 30 && /Sala/.test(r.data.name) && emartUrls.length === 0, r);
+  r = adm("emartPricePage", { store: "sala", cat: 58 });
+  const em0 = r.data && r.data.items[0], em1 = r.data && r.data.items[1];
+  check("Emart: đọc trang ngành đúng siêu thị, giá cũ/mới, chương trình, mã vạch, tạm hết hàng", r.ok && r.data.items.length === 2 && /^https:\/\/sala\.emartmall\.com\.vn\/.*path=58&limit=5000$/.test(emartUrls[0]) && em0.id === "EMART:111773" && em0.name === "Sữa T&H 1L" && em0.final === 29800 && em0.base === 35000 && em0.title === "MUA 2 TÍNH TIỀN 1" && em0.code === "8936088900586" && em0.grp === "Sữa" && em0.can && em1.final === 39000 && em1.base === 39000 && em1.off === 0 && em1.title === "" && !em1.can, r.data);
+  r = adm("emartPricePage", { store: "abc", cat: 58 });
+  check("Emart: mã siêu thị lạ → lỗi rõ", /Mã siêu thị Emart/.test(r.error), r);
+  r = call("emartPricePage", { token: viewer.token, store: "sala", cat: 58 });
+  // ---- Chạy GitHub lấy giá chuỗi khác ----
+  let ghReq = [];
+  r = adm("ghDispatch", { chains: "" });
+  check("GitHub: chưa có khoá → báo rõ, không gọi GitHub", /GITHUB_TOKEN/.test(r.error), r);
+  M.props.set("GITHUB_TOKEN", "github_pat_test");
+  let ghCode = 204;
+  M.fetchHandler = (url, o) => { ghReq.push({ url, o }); if (/dispatches$/.test(url)) return { code: ghCode, body: "" };
+    if (/runs\?/.test(url)) return { code: 200, body: { workflow_runs: [{ id: 7, status: "in_progress", conclusion: null, created_at: "2026-11-12T09:00:00Z", updated_at: "2026-11-12T09:02:00Z", html_url: "https://github.com/x/y/actions/runs/7", logs_url: "secret" }] } };
+    return { code: 404, body: {} }; };
+  r = adm("ghDispatch", { chains: "LOTTE coop rm-rf; x" });
+  const gd = ghReq[0];
+  check("GitHub: gửi lệnh chạy đúng repo, đúng workflow, nhánh main, chỉ chuỗi hợp lệ, khoá ở header", r.ok && gd.url === "https://api.github.com/repos/tuethuleedu-sketch/wm-bhx-price-bench/actions/workflows/sync.yml/dispatches"
+    && gd.o.method === "post" && JSON.parse(gd.o.payload).ref === "main" && JSON.parse(gd.o.payload).inputs.chains === "lotte coop" && gd.o.headers.Authorization === "Bearer github_pat_test" && !JSON.stringify(r.data).includes("github_pat"), { r, gd });
+  r = adm("ghStatus");
+  check("GitHub: trạng thái lần chạy mới nhất, không trả khoá hay nhật ký", r.ok && r.data.run.status === "in_progress" && r.data.run.url === "https://github.com/x/y/actions/runs/7" && !JSON.stringify(r.data).includes("secret") && !!r.data.dispatched, r);
+  ghCode = 401; r = adm("ghDispatch", { chains: "" });
+  check("GitHub: khoá hết hạn → báo tạo khoá mới", /hết hạn/.test(r.error), r);
+  ghCode = 404; r = adm("ghDispatch", { chains: "" });
+  check("GitHub: khoá thiếu quyền → báo rõ", /không có quyền/.test(r.error), r);
+  r = call("ghDispatch", { token: viewer.token, chains: "" });
+  check("GitHub: Viewer không bấm được", /Chỉ Admin/.test(r.error), r);
+  M.props.delete("GITHUB_TOKEN");
+  r = call("emartPricePage", { token: viewer.token, store: "sala", cat: 58 });
+  check("Emart, Co.op: Viewer không gọi được", /Chỉ Admin/.test(r.error) && /Chỉ Admin/.test(call("coopPricePage", { token: viewer.token, slug: "" }).error), r);
   M.fetchHandler = prevFetch; if (cfgOld) M.props.set("price_cfg", cfgOld);
   M.fetchHandler = fbOld;
 

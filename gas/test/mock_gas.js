@@ -132,7 +132,7 @@
   const resp = (x) => ({ getResponseCode: () => x.code, getContentText: () => (typeof x.body === "string" ? x.body : JSON.stringify(x.body)) });
   G.UrlFetchApp = {
     fetch: (url, opts) => { M.fetchLog.push(url); return resp(M.fetchHandler(url, opts)); },
-    fetchAll: (reqs) => reqs.map((r) => { M.fetchLog.push(r.url); return resp(M.fetchHandler(r.url)); }),
+    fetchAll: (reqs) => reqs.map((r) => { M.fetchLog.push(r.url); return resp(M.fetchHandler(r.url, r)); }),
   };
   G.Utilities.sleep = () => {};
 
