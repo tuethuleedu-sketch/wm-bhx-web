@@ -42,6 +42,10 @@ const CFG = {
   FIREBASE_WEB_KEY: 'AIzaSyBXVRExNrdhPRpgQxCjYFcmhCbryMvZ9yw', // mã web công khai của Firebase, chỉ để xác minh đăng nhập
   PRICE_STEP_MS: 240000,     // mỗi lần gọi lấy giá chạy tối đa 4 phút, chừa thời gian ghi dữ liệu
   PRICE_HIST_DAYS: 180,      // tab Giá đối thủ tải lịch sử 180 ngày gần nhất; dữ liệu cũ hơn vẫn được giữ trong Sheet
+  // GitHub lấy giá LOTTE, Kingfoodmart, Co.op, Emart. Khoá GitHub (GITHUB_TOKEN) Admin tự dán vào Script Properties:
+  // khoá loại fine-grained, chỉ repo dưới đây, quyền Actions: Read and write.
+  GH_REPO: 'tuethuleedu-sketch/wm-bhx-price-bench',
+  GH_WORKFLOW: 'sync.yml',
 };
 
 const TABS = {
@@ -101,7 +105,7 @@ function route_(req) {
   if (a === 'route') return roadRoute_(req.points);
   if (a === 'prices') return prices_();
   // Chỉ Admin
-  if (['versions', 'publishWm', 'publishPrices', 'priceConfig', 'savePriceConfig', 'priceTest', 'priceStart', 'priceStep', 'priceFinish', 'priceCancel', 'priceAutoStores', 'kfmPricePage', 'botStatus', 'saveBotKey', 'saveBotModel', 'askBot', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
+  if (['versions', 'publishWm', 'publishPrices', 'priceConfig', 'savePriceConfig', 'priceTest', 'priceStart', 'priceStep', 'priceFinish', 'priceCancel', 'priceAutoStores', 'kfmPricePage', 'coopPricePage', 'emartPricePage', 'ghDispatch', 'ghStatus', 'botStatus', 'saveBotKey', 'saveBotModel', 'askBot', 'listUsers', 'addUser', 'removeUser', 'resetPassword', 'setSetting', 'accessLog'].indexOf(a) >= 0) {
     if (u.role !== 'admin') throw new Error('Chỉ Admin được làm thao tác này');
     if (a === 'versions') return versions_();
     if (a === 'publishWm') return publishWm_(u, req.rows);
@@ -115,6 +119,10 @@ function route_(req) {
     if (a === 'priceCancel') return priceCancel_();
     if (a === 'priceAutoStores') return priceAutoStores_(req.keep);
     if (a === 'kfmPricePage') return kfmPricePage_(req.slug, req.page);
+    if (a === 'coopPricePage') return coopPricePage_(req.slug, req.page);
+    if (a === 'emartPricePage') return emartPricePage_(req.store, req.cat);
+    if (a === 'ghDispatch') return ghDispatch_(u, req.chains);
+    if (a === 'ghStatus') return ghStatus_();
     if (a === 'botStatus') return botStatus_();
     if (a === 'saveBotKey') return saveBotKey_(u, req.key);
     if (a === 'saveBotModel') return saveBotModel_(u, req.model);
@@ -849,11 +857,128 @@ function kfmPricePage_(slugRaw, pageRaw) {
     const final = sale > 0 ? sale : base, b = base > final ? base : final;
     const promo = String((v.promotionSummary && (v.promotionSummary.text || v.promotionSummary.title)) || '').slice(0, 200);
     return { id: 'KFM:' + String(x.id), code: String(v.sku || ''), name: String(x.name || v.name || '').slice(0, 300), grp: top.name, cat: tree.sub[String(x.subCate || '')] || top.name,
-      brand: '', unit: String((v.unit && v.unit.name) || ''), url: x.subCate && (v.slug || x.slug) ? 'https://kingfoodmart.com/' + encodeURIComponent(x.subCate) + '/' + encodeURIComponent(v.slug || x.slug) : '', final: final, base: b,
+      brand: '', unit: String((v.unit && (typeof v.unit === 'object' ? v.unit.name : v.unit)) || ''), url: x.subCate && (v.slug || x.slug) ? 'https://kingfoodmart.com/' + encodeURIComponent(x.subCate) + '/' + encodeURIComponent(v.slug || x.slug) : '', final: final, base: b,
       off: b > 0 && final > 0 && b > final ? 1 - final / b : 0, title: promo, can: String(x.stockState || '') !== 'OUT_OF_STOCK' && num(x.inStock) !== 0 };
   });
   const pg = d.pagination || {};
   return { items: items, page: page, last: Number(pg.last_page) || page, total: Number(pg.total) || items.length };
+}
+
+// ───────────────────────── Giá Co.op Online (Admin bấm Cập nhật giá) ─────────────────────────
+// Co.op Online chạy trên nền Teko; web chỉ cho trang cooponline.vn gọi thẳng, nên Apps Script lấy hộ.
+// Giá là giá bán online của Co.op Online (kho mặc định của web), không theo từng siêu thị. Không ghi gì vào Sheet.
+// Mỗi ngành lớn tối đa 5.000 SKU (giới hạn của web), 1.000 SKU một trang.
+const COOP_PRICE = {
+  URL: 'https://discovery.tekoapis.com/api/v2/search-skus-v2',
+  TERMINAL: 26607,
+  SIZE: 1000,
+  MAX_PAGE: 5,
+  // Ngành lớn trên web (bỏ "Nhãn hàng Co.op" vì trùng với các ngành khác)
+  CATS: ['rau-cu-trai-cay', 'thit-trung-hai-san', 'thuc-an-che-bien-bun-tuoi', 'thuc-pham-dong-mat', 'sua-san-pham-tu-sua', 'thuc-uong',
+    'banh-keo-snack', 'gia-vi-gao-thuc-pham-kho', 'san-pham-cho-be', 'cham-soc-ca-nhan', 'nha-cua-va-doi-song'],
+};
+// slug trống: trả danh sách ngành. Có slug: trả 1 trang SKU đã chuẩn hoá.
+function coopPricePage_(slugRaw, pageRaw) {
+  const slug = String(slugRaw || '');
+  if (!slug) return { cats: COOP_PRICE.CATS.map(function (s) { return { slug: s }; }) };
+  if (COOP_PRICE.CATS.indexOf(slug) < 0) throw new Error('Ngành Co.op không tồn tại: ' + slug);
+  const page = Math.max(1, Math.min(COOP_PRICE.MAX_PAGE, Number(pageRaw) || 1));
+  const j = compJson_({ url: COOP_PRICE.URL, method: 'post', contentType: 'application/json', payload: JSON.stringify({ terminalId: COOP_PRICE.TERMINAL, page: page, pageSize: COOP_PRICE.SIZE,
+    slug: '/c/' + slug, filter: {}, sorting: { sort: 'SORT_BY_UNSPECIFIED', order: 'ORDER_BY_UNSPECIFIED' }, returnFilterable: [] }) });
+  const d = j.data || j;
+  if (!Array.isArray(d.products)) throw new Error('Dữ liệu Co.op sai định dạng — web có thể đã đổi cấu trúc');
+  const num = function (v) { const x = Number(v); return isFinite(x) ? x : 0; };
+  const items = d.products.map(function (x) {
+    const cats = (x.categories || []).map(function (c) { return String(c.name || ''); }).filter(String);
+    const final = num(x.latestPrice), base = Math.max(num(x.supplierRetailPrice), final);
+    const can = x.sellable !== false && num(x.totalAvailable) > 0;
+    return { id: 'COOP:' + String(x.sku), code: String(x.sku || ''), name: String(x.name || '').slice(0, 300), grp: cats[0] || '', cat: cats[1] || cats[0] || '',
+      brand: String(x.brandName || '').slice(0, 100), unit: String(x.uomName || '').slice(0, 30),
+      url: /^[a-z0-9-]+$/.test(String(x.canonical || '')) ? 'https://cooponline.vn/' + x.canonical : '',
+      final: final, base: base, off: base > 0 && final > 0 && base > final ? 1 - final / base : 0, title: '', can: can };
+  }).filter(function (r) { return r.final > 0; });
+  const total = num(d.total), last = Math.min(COOP_PRICE.MAX_PAGE, Math.max(1, Math.ceil(total / COOP_PRICE.SIZE)));
+  return { items: items, page: page, last: last, total: total };
+}
+
+// ───────────────────────── Giá Emart (Admin bấm Cập nhật giá) ─────────────────────────
+// Mỗi siêu thị Emart có web riêng, giá theo từng siêu thị. Web trả trang HTML nên Apps Script đọc hộ rồi trả dữ liệu gọn.
+// Mỗi lần gọi = 1 ngành của 1 siêu thị. Web Emart chậm (10–30 giây một ngành).
+const EMART_PRICE = {
+  HOSTS: { pvt: 'https://emartmall.com.vn', sala: 'https://sala.emartmall.com.vn', phi: 'https://phi.emartmall.com.vn' },
+  NAMES: { pvt: 'Emart Phan Văn Trị (Gò Vấp)', sala: 'Emart Sala (Thủ Đức)', phi: 'Emart Phan Huy Ích (Gò Vấp)' },
+  // Ngành cấp 2 trên web, tên Việt dùng làm nhóm. Bỏ chăn ga, phòng khách, hoa, đồ chơi, thú cưng, thể thao, điện máy, công nghệ.
+  // Hàng No Brand và hàng Hàn để cuối: SKU nào đã có ở ngành thường thì giữ ngành thường.
+  CATS: [[2, 'Bánh mì, bánh ngọt'], [3, 'Món ăn chế biến sẵn'], [12, 'Rau củ'], [9, 'Trái cây'], [21, 'Trứng, thịt, hải sản'], [28, 'Gạo'], [29, 'Đồ khô'],
+    [50, 'Thực phẩm ăn liền'], [58, 'Sữa'], [67, 'Thực phẩm mát'], [71, 'Thực phẩm đông lạnh'], [54, 'Bánh kẹo, snack'], [62, 'Đồ uống'],
+    [48, 'Dầu ăn, bơ thực vật'], [107, 'Nước chấm'], [49, 'Gia vị, nước sốt'], [108, 'Bột, hạt, nấm khô'], [61, 'Thực phẩm dinh dưỡng'], [75, 'Đồ chay'],
+    [77, 'Chăm sóc răng miệng'], [78, 'Chăm sóc da mặt'], [79, 'Chăm sóc tóc'], [80, 'Chăm sóc cơ thể'], [81, 'Chăm sóc cá nhân khác'], [82, 'Mẹ và bé'],
+    [84, 'Vệ sinh nhà cửa'], [90, 'Đồ dùng nhà bếp'], [102, 'Đồ dùng phòng tắm'], [101, 'Đồ dùng gia đình khác'],
+    [31, 'No Brand: ăn liền, gia vị'], [32, 'No Brand: bánh kẹo'], [33, 'No Brand: đồ uống'], [34, 'No Brand: đông lạnh'], [35, 'No Brand: chăm sóc cá nhân'], [36, 'No Brand: nhà cửa'],
+    [38, 'Hàng Hàn: thực phẩm'], [45, 'Hàng Hàn: chăm sóc cá nhân'], [46, 'Hàng Hàn: nhà cửa']],
+};
+const emartMoney_ = function (s) { return Number(String(s).replace(/[^\d]/g, '')) || 0; };
+// Đọc các ô sản phẩm trong trang ngành. Mỗi ô có link product_id, tên, giá (giá cũ + giá mới khi giảm), chương trình, dấu tạm hết hàng.
+function parseEmart_(html, store, grp) {
+  const host = EMART_PRICE.HOSTS[store], out = [];
+  String(html).split('class="product-block').slice(1).forEach(function (chunk) {
+    const id = /product_id=(\d+)/.exec(chunk);
+    const nm = /<div class="name">\s*<a[^>]*>([\s\S]*?)<\/a>/.exec(chunk);
+    const pr = /<div class="price">([\s\S]*?)<\/div>/.exec(chunk);
+    if (!id || !nm || !pr) return;
+    const money = (pr[1].match(/[\d][\d.,]*\s*(?:₫|&#8363;|đ)/g) || []).map(emartMoney_).filter(function (x) { return x > 0; });
+    if (!money.length) return;
+    const final = money[money.length - 1], base = Math.max(money[0], final);
+    const of = /<div class="offer-block">([\s\S]*?)<\/div>/.exec(chunk), bc = /catalog\/products\/(\d{8,14})\//.exec(chunk);
+    const title = of ? htmlText_(of[1].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+    out.push({ id: 'EMART:' + id[1], code: bc ? bc[1] : '', name: htmlText_(nm[1].replace(/<[^>]+>/g, '')).trim().slice(0, 300), grp: grp, cat: grp, brand: '', unit: '',
+      url: host + '/index.php?route=product/product&product_id=' + id[1], final: final, base: base, off: base > final ? 1 - final / base : 0, title: title,
+      can: chunk.indexOf('class="shortage"') < 0 });
+  });
+  return out;
+}
+// cat trống: trả danh sách ngành và tên siêu thị. Có cat: trả toàn bộ SKU của ngành đó ở siêu thị đó.
+function emartPricePage_(storeRaw, catRaw) {
+  const store = String(storeRaw || '');
+  if (!EMART_PRICE.HOSTS[store]) throw new Error('Mã siêu thị Emart không đúng (pvt, sala hoặc phi): ' + store);
+  if (catRaw === undefined || catRaw === null || catRaw === '') return { cats: EMART_PRICE.CATS.map(function (c) { return { id: c[0], name: c[1] }; }), name: EMART_PRICE.NAMES[store] };
+  const c = EMART_PRICE.CATS.filter(function (x) { return x[0] === Number(catRaw); })[0];
+  if (!c) throw new Error('Ngành Emart không tồn tại: ' + catRaw);
+  const html = compTexts_([{ url: EMART_PRICE.HOSTS[store] + '/index.php?route=product/category&path=' + c[0] + '&limit=5000' }])[0];
+  if (html.indexOf('product-block') < 0 && html.indexOf('<html') < 0) throw new Error('Trang Emart không đọc được — web có thể đã đổi cấu trúc');
+  return { items: parseEmart_(html, store, c[1]) };
+}
+
+// ───────────────────────── Chạy GitHub lấy giá chuỗi khác (Admin bấm Cập nhật giá) ─────────────────────────
+// Apps Script giữ khoá GitHub (không đưa ra web). Khoá chỉ chạy được workflow của 1 repo riêng tư.
+function ghCall_(path, method, body) {
+  const token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
+  if (!token) throw new Error('Chưa có khoá GitHub. Dán khoá vào Script Properties với tên GITHUB_TOKEN (xem hướng dẫn).');
+  const r = UrlFetchApp.fetch('https://api.github.com/repos/' + CFG.GH_REPO + '/actions/workflows/' + CFG.GH_WORKFLOW + path, {
+    method: method || 'get', muteHttpExceptions: true, contentType: 'application/json', payload: body ? JSON.stringify(body) : undefined,
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } });
+  const code = r.getResponseCode();
+  if (code === 401) throw new Error('Khoá GitHub sai hoặc đã hết hạn. Tạo khoá mới rồi dán lại vào GITHUB_TOKEN.');
+  if (code === 403 || code === 404) throw new Error('Khoá GitHub không có quyền chạy workflow của ' + CFG.GH_REPO + ' (cần quyền Actions: Read and write cho đúng repo này).');
+  if (code >= 300) throw new Error('GitHub báo lỗi ' + code + '.');
+  return code === 204 ? null : JSON.parse(r.getContentText());
+}
+const GH_CHAINS = ['lotte', 'kfm', 'coop', 'emart'];
+function ghDispatch_(u, chainsRaw) {
+  const chains = String(chainsRaw || '').toLowerCase().split(/\s+/).filter(function (c) { return GH_CHAINS.indexOf(c) >= 0; }).join(' ');
+  ghCall_('/dispatches', 'post', { ref: 'main', inputs: { chains: chains } });
+  const at = new Date().toISOString();
+  PropertiesService.getScriptProperties().setProperty('gh_dispatched', at);
+  log_(u.email, 'gh_dispatch');
+  return { at: at, chains: chains };
+}
+// Lần chạy mới nhất (bấm từ web hoặc trên GitHub). Chỉ trả trạng thái, không trả nhật ký.
+function ghStatus_() {
+  const d = ghCall_('/runs?per_page=1&event=workflow_dispatch');
+  const r = (d && d.workflow_runs || [])[0];
+  if (!r) return { run: null, dispatched: PropertiesService.getScriptProperties().getProperty('gh_dispatched') || '' };
+  return { run: { id: r.id, status: String(r.status), conclusion: r.conclusion ? String(r.conclusion) : '', created: r.created_at, updated: r.updated_at,
+    url: /^https:\/\/github\.com\//.test(r.html_url || '') ? r.html_url : '' }, dispatched: PropertiesService.getScriptProperties().getProperty('gh_dispatched') || '' };
 }
 
 // Tab chưa tạo (chưa chạy lại setup) → coi như chưa có dữ liệu, không làm hỏng trang.
