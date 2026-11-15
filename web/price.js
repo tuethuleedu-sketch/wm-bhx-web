@@ -451,19 +451,47 @@ window.WMPrice = (function () {
     // Khớp được ngành nhỏ (LEAF_MAP) thì dùng; chưa lập mapping cho nhóm đó thì PHẢI rơi về ngành lớn chung
     // (x.l1, đã chuẩn hoá cho mọi chuỗi) — tuyệt đối không rơi về tên gốc riêng của từng chuỗi (sẽ không khớp được ai).
     const leafName = (l, x) => CatTree.leafOf(l.chain, x.cat || "") || x.l1 || x.cat || "";
-    const label = new Map();
-    locs.forEach((l) => l.active.forEach((x) => { const nm = leafName(l, x), k = plain(nm); if (k && !label.has(k)) label.set(k, nm); }));
+    // 1 lượt duyệt duy nhất mỗi chuỗi (không lặp lại cho từng ngành) — tránh chậm khi nhiều SKU (sau khi Emart/GO! tăng dữ liệu).
+    const label = new Map(), byLocByKey = locs.map((l) => {
+      const m = new Map();
+      l.active.forEach((x) => {
+        if (!x.final) return;
+        const nm = leafName(l, x), k = plain(nm);
+        if (!k) return;
+        if (!label.has(k)) label.set(k, nm);
+        (m.get(k) || m.set(k, []).get(k)).push(x.final);
+      });
+      return m;
+    });
     const keys = [...label.keys()].sort((a, b) => label.get(a).localeCompare(label.get(b), "vi"));
     const dates = new Set(locs.map((l) => l.latest));
     $("#p-chain-cmp-note").innerHTML = `So sánh các chuỗi có cửa hàng tại <b>${esc(C.prov)}</b>, cửa hàng ${esc(F.khu.toLowerCase())}. Nhóm "Thịt, cá, trứng, rau củ" đã có bảng ánh xạ ngành nhỏ chính thức; nhóm khác tạm khớp theo tên đã chuẩn hoá (bỏ dấu, hoa/thường). Mỗi chuỗi chỉ 1 cửa hàng/kho online nên đây là tham khảo, không đại diện cho cả chuỗi.`
       + (dates.size > 1 ? ` <b>Các chuỗi có ngày lấy giá khác nhau nên so sánh chỉ mang tính tham khảo.</b>` : "");
     $("#t-p-chain thead").innerHTML = `<tr><th>Ngành</th>${locs.map((l) => `<th class="num">${esc(CHAINS[l.chain] || l.chain)}<br><span class="muted small">${dayVN(l.latest)}</span></th>`).join("")}</tr>`;
     const rows = keys.map((k) => {
-      const vals = locs.map((l) => { const r = l.active.filter((x) => plain(leafName(l, x)) === k && x.final); return r.length ? median(r.map((x) => x.final)) : null; });
+      const vals = byLocByKey.map((m) => { const arr = m.get(k); return arr && arr.length ? median(arr) : null; });
       return vals.some((v) => v != null) ? { name: label.get(k), vals } : null;
     }).filter(Boolean);
     $("#t-p-chain tbody").innerHTML = rows.map((r) => `<tr><td>${esc(r.name)}</td>${r.vals.map((v) => `<td class="num">${v == null ? "–" : fmt(v)}</td>`).join("")}</tr>`).join("")
       || `<tr><td class="muted">Không có ngành nào khớp tên giữa các chuỗi.</td></tr>`;
+    renderSkuCompare(locs);
+  }
+  // So khớp từng SKU theo mã vạch — chỉ BHX ↔ Emart có mã vạch thật, khớp được chính xác 1 sản phẩm (không qua trung gian ngành).
+  function renderSkuCompare(locs) {
+    const el = $("#p-sku-cmp");
+    if (!el) return;
+    const bhx = locs.find((l) => l.chain === "BHX"), emart = locs.find((l) => l.chain === "EMART");
+    if (!bhx || !emart) { el.hidden = true; return; }
+    const byCode = new Map();
+    emart.active.forEach((x) => { if (x.code && x.final) byCode.set(x.code, x); });
+    const matched = [];
+    bhx.active.forEach((x) => { if (x.code && x.final && byCode.has(x.code)) matched.push({ bhx: x, emart: byCode.get(x.code) }); });
+    el.hidden = false;
+    $("#p-sku-cmp-note").textContent = matched.length
+      ? `Khớp đúng mã vạch, ${matched.length} sản phẩm trùng cả 2 bên tại ${C.prov}.`
+      : `Chưa có SKU nào trùng mã vạch giữa BHX và Emart tại ${C.prov} (có thể do khác tỉnh/chưa cập nhật giá Emart).`;
+    $("#t-p-sku tbody").innerHTML = matched.slice(0, 200).map((m) => `<tr><td>${esc(m.bhx.name)}</td><td class="num">${fmt(m.bhx.final)}</td><td class="num">${fmt(m.emart.final)}</td><td class="num">${pct(m.emart.final / m.bhx.final - 1)}</td></tr>`).join("")
+      || `<tr><td colspan="4" class="muted">Không có SKU khớp.</td></tr>`;
   }
   // Rổ cố định: SKU trong bộ lọc có giá ở mọi mốc, nên chỉ số không đổi vì SKU mới vào hay SKU biến mất.
   function trendCalc(rows) {
