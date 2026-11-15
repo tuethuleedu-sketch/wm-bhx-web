@@ -19,8 +19,8 @@ window.WMPrice = (function () {
   // Chuỗi khác BHX thêm mã chuỗi ở đầu, ví dụ "KFM: Hồ Chí Minh". BHX giữ nguyên tên tỉnh để khớp dữ liệu cũ.
   const URBAN = "Thành thị", RURAL = "Nông thôn", SUFFIX = " · " + RURAL;
   const CHAINS = { BHX: "Bách Hóa Xanh", COOP: "Co.op Online", EMART: "Emart", GO: "GO! / Big C / Tops", KFM: "Kingfoodmart", LOTTE: "LOTTE Mart" };
-  const CFG_CHAINS = ["BHX", "LOTTE", "KFM", "COOP", "EMART"];   // chuỗi lấy được giá
-  const EMART_STORES = { pvt: "Emart Phan Văn Trị, Gò Vấp", sala: "Emart Sala, Thủ Đức", phi: "Emart Phan Huy Ích, Gò Vấp" };
+  const CFG_CHAINS = ["BHX", "LOTTE", "KFM", "COOP", "EMART", "GO"];   // chuỗi lấy được giá
+  // Tên địa điểm Emart không còn chốt cứng — đọc thật từ gas.emartPricePage("pvt", "") khi cần (xem nơi dùng ở dưới).
   const CHAIN_RE = /^([A-Z]{2,8}): /;
   const chainOf = (loc) => { const m = CHAIN_RE.exec(loc); return m ? m[1] : "BHX"; };
   const provOf = (loc) => { const s = loc.replace(CHAIN_RE, ""); return s.endsWith(SUFFIX) ? s.slice(0, -SUFFIX.length) : s; };
@@ -432,6 +432,36 @@ window.WMPrice = (function () {
     const gaps = common.map((m) => { const f = m.at.map((x) => x.final), lo = Math.min(...f), hi = Math.max(...f); return { m, gap: hi / lo - 1, lo, hi }; }).filter((g) => g.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 15);
     $("#t-p-gap thead").innerHTML = `<tr><th>SKU</th><th>Ngành</th>${P.map((p) => `<th class="num">${esc(p.prov)} (đ)</th>`).join("")}<th class="num">Chênh cao/thấp</th></tr>`;
     $("#t-p-gap tbody").innerHTML = gaps.map((g) => `<tr><td>${esc(g.m.x.name)}</td><td>${esc(g.m.x.cat)}</td>${g.m.at.map((x) => `<td class="num">${x.final === g.hi ? `<span class="p-hi">${fmt(x.final)}</span>` : x.final === g.lo ? `<span class="p-lo">${fmt(x.final)}</span>` : fmt(x.final)}</td>`).join("")}<td class="num">${pct(g.gap)}</td></tr>`).join("") || `<tr><td colspan="${P.length + 3}" class="muted">Không có SKU chênh giá.</td></tr>`;
+    renderChainCompare();
+  }
+  // So sánh giữa các chuỗi tại cùng tỉnh: mỗi chuỗi có thể đặt tên ngành khác hoa/thường nhưng BHX/LOTTE/KFM/Emart
+  // (sau khi nâng cấp EMART_PRICE.CATS) đều dùng chung tên ngành nhỏ như "Thịt heo", "Thịt gà" — khớp bằng plain() (bỏ dấu, hạ chữ).
+  // Co.op chưa kiểm chứng tên, nếu không khớp sẽ tự rơi vào dòng riêng (không gộp sai).
+  function chainCompareLocs() {
+    if (!D || !C) return [];
+    const chains = [...new Set([...D.byT.values()].map((p) => p.chain))];
+    return chains.map((c) => D.byT.get(locKey(C.prov, F.khu, c))).filter(Boolean);
+  }
+  function renderChainCompare() {
+    const locs = chainCompareLocs(), many = locs.length >= 2;
+    $("#p-chain-cmp-need").hidden = many;
+    $("#p-chain-cmp-body").hidden = !many;
+    if (!many) return;
+    // Ưu tiên bảng ánh xạ chính thức (CatTree.leafOf) nếu nhóm đó đã lập; chưa lập thì rơi về so khớp chữ như trước.
+    const leafName = (l, x) => CatTree.leafOf(l.chain, x.cat || "") || x.cat || "";
+    const label = new Map();
+    locs.forEach((l) => l.active.forEach((x) => { const nm = leafName(l, x), k = plain(nm); if (k && !label.has(k)) label.set(k, nm); }));
+    const keys = [...label.keys()].sort((a, b) => label.get(a).localeCompare(label.get(b), "vi"));
+    const dates = new Set(locs.map((l) => l.latest));
+    $("#p-chain-cmp-note").innerHTML = `So sánh các chuỗi có cửa hàng tại <b>${esc(C.prov)}</b>, cửa hàng ${esc(F.khu.toLowerCase())}. Nhóm "Thịt, cá, trứng, rau củ" đã có bảng ánh xạ ngành nhỏ chính thức; nhóm khác tạm khớp theo tên đã chuẩn hoá (bỏ dấu, hoa/thường). Mỗi chuỗi chỉ 1 cửa hàng/kho online nên đây là tham khảo, không đại diện cho cả chuỗi.`
+      + (dates.size > 1 ? ` <b>Các chuỗi có ngày lấy giá khác nhau nên so sánh chỉ mang tính tham khảo.</b>` : "");
+    $("#t-p-chain thead").innerHTML = `<tr><th>Ngành</th>${locs.map((l) => `<th class="num">${esc(CHAINS[l.chain] || l.chain)}<br><span class="muted small">${dayVN(l.latest)}</span></th>`).join("")}</tr>`;
+    const rows = keys.map((k) => {
+      const vals = locs.map((l) => { const r = l.active.filter((x) => plain(leafName(l, x)) === k && x.final); return r.length ? median(r.map((x) => x.final)) : null; });
+      return vals.some((v) => v != null) ? { name: label.get(k), vals } : null;
+    }).filter(Boolean);
+    $("#t-p-chain tbody").innerHTML = rows.map((r) => `<tr><td>${esc(r.name)}</td>${r.vals.map((v) => `<td class="num">${v == null ? "–" : fmt(v)}</td>`).join("")}</tr>`).join("")
+      || `<tr><td class="muted">Không có ngành nào khớp tên giữa các chuỗi.</td></tr>`;
   }
   // Rổ cố định: SKU trong bộ lọc có giá ở mọi mốc, nên chỉ số không đổi vì SKU mới vào hay SKU biến mất.
   function trendCalc(rows) {
@@ -596,7 +626,7 @@ window.WMPrice = (function () {
   const warnLeave = (e) => { e.preventDefault(); e.returnValue = ""; };
   // GitHub lấy giá LOTTE, Kingfoodmart, Co.op, Emart (nhanh, không cần giữ tab). BHX vẫn lấy ở trang này.
   // Phạm vi → [chuỗi cho GitHub ("" = cả 4, null = không chạy GitHub), phạm vi cho trang này (null = không chạy)].
-  const GH_PLAN = { all: ["", "BHX"], LOTTE: ["lotte", null], KFM: ["kfm", null], COOP: ["coop", null], EMART: ["emart", null] };
+  const GH_PLAN = { all: ["", "BHX"], LOTTE: ["lotte", null], KFM: ["kfm", null], COOP: ["coop", null], EMART: ["emart", null], GO: ["go", null] };
   const GH_STATE = { queued: "đang chờ máy", in_progress: "đang chạy", waiting: "đang chờ", requested: "đang chờ máy", pending: "đang chờ máy" };
   const GH_DONE = { success: "đã xong", failure: "có lỗi", cancelled: "đã huỷ", timed_out: "quá thời gian" };
   let ghWatch = 0;
@@ -706,27 +736,45 @@ window.WMPrice = (function () {
     }
     // Thêm LOTTE (mỗi tỉnh 1 siêu thị, gần cửa hàng BHX thành thị của tỉnh nhất), Kingfoodmart và Co.op Online (giá online, 1 nơi),
     // Emart (1 siêu thị ở Hồ Chí Minh; đổi mã pvt/sala/phi để lấy siêu thị khác).
+    // Phân loại Thành thị/Nông thôn theo địa chỉ, giống đúng quy tắc BHX dùng (storeArea_ trong Code.gs) — để tự nhận ra
+    // siêu thị LOTTE ở nông thôn nếu sau này LOTTE mở thêm, không cần sửa code.
+    const storeArea = (addr) => { const a = " " + String(addr || "").toLowerCase().normalize("NFC") + " ";
+      if (/[\s,(]phường[\s\d]|[\s,(]p\.\s?\S/.test(a)) return URBAN;
+      if (/[\s,(]xã\s|[\s,(]thị trấn\s|[\s,(]tt\.\s?\S/.test(a)) return RURAL;
+      return ""; };
     $("#p-cfg-chains").addEventListener("click", () => {
       const msg = $("#p-cfg-msg"), rows = [...document.querySelectorAll("#t-p-cfg tbody tr")].map((tr) => { const o = {}; tr.querySelectorAll("input,select").forEach((i) => (o[i.dataset.k] = i.value.trim())); return o; });
-      const have = new Set(rows.map((r) => (r.chain || "BHX") + "|" + r.tinh));
+      const have = new Set(rows.map((r) => (r.chain || "BHX") + "|" + r.tinh + "|" + (r.khu || URBAN)));
       const lotte = STORES.filter((s) => s.chain === "LOTTE" && /^[a-z]{2,6}$/.test(String(s.ma)));
-      const bhxAt = (tinh) => { const r = rows.find((x) => (x.chain || "BHX") === "BHX" && x.tinh === tinh && x.khu !== RURAL); const s = r && STORES.find((b) => b.chain === "BHX" && String(b.ma) === String(r.storeId)); return s || null; };
+      const bhxAt = (tinh, khu) => { const r = rows.find((x) => (x.chain || "BHX") === "BHX" && x.tinh === tinh && (x.khu || URBAN) === khu); const s = r && STORES.find((b) => b.chain === "BHX" && String(b.ma) === String(r.storeId)); return s || null; };
       const d2 = (a, b) => (a.lat - b.lat) ** 2 + ((a.lng - b.lng) * Math.cos(a.lat * Math.PI / 180)) ** 2;
       const byT = new Map(); lotte.forEach((s) => { if (!byT.has(s.tinh)) byT.set(s.tinh, []); byT.get(s.tinh).push(s); });
       const add = [];
       byT.forEach((list, tinh) => {
-        if (have.has("LOTTE|" + tinh)) return;
         // Không có cửa hàng BHX để so: ưu tiên siêu thị có địa chỉ ghi đúng tên tỉnh (trước sáp nhập), rồi theo mã.
         const named = (s) => (provKey(s.dia_chi || "").includes(provKey(tinh)) || plain(s.dia_chi || "").includes(plain(tinh)) ? 0 : 1);
-        const ref = bhxAt(tinh), pick = ref ? list.reduce((m, s) => (d2(s, ref) < d2(m, ref) ? s : m)) : list.slice().sort((a, b) => named(a) - named(b) || String(a.ma).localeCompare(String(b.ma)))[0];
-        add.push({ chain: "LOTTE", tinh, khu: URBAN, provinceId: "", wardId: "", storeId: String(pick.ma), addr: pick.dia_chi || "" });
+        if (!have.has("LOTTE|" + tinh + "|" + URBAN)) {
+          const ref = bhxAt(tinh, URBAN), pick = ref ? list.reduce((m, s) => (d2(s, ref) < d2(m, ref) ? s : m)) : list.slice().sort((a, b) => named(a) - named(b) || String(a.ma).localeCompare(String(b.ma)))[0];
+          add.push({ chain: "LOTTE", tinh, khu: URBAN, provinceId: "", wardId: "", storeId: String(pick.ma), addr: pick.dia_chi || "" });
+        }
+        // Tỉnh có BHX Nông thôn, LOTTE cũng có siêu thị phân loại Nông thôn (theo địa chỉ) thì tự thêm — giống đúng quy tắc BHX.
+        // Không có siêu thị LOTTE nào ở nông thôn tỉnh này thì bỏ qua, không bắt ép thêm dòng vô nghĩa.
+        if (!have.has("LOTTE|" + tinh + "|" + RURAL) && bhxAt(tinh, RURAL)) {
+          const rural = list.filter((s) => storeArea(s.dia_chi) === RURAL);
+          if (rural.length) {
+            const ref = bhxAt(tinh, RURAL), pick = rural.reduce((m, s) => (d2(s, ref) < d2(m, ref) ? s : m));
+            add.push({ chain: "LOTTE", tinh, khu: RURAL, provinceId: "", wardId: "", storeId: String(pick.ma), addr: pick.dia_chi || "" });
+          }
+        }
       });
-      if (!have.has("KFM|Hồ Chí Minh")) add.push({ chain: "KFM", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "online", addr: "Giá bán online của Kingfoodmart (cửa hàng mặc định của web)" });
-      if (!have.has("COOP|Hồ Chí Minh")) add.push({ chain: "COOP", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "online", addr: "Giá bán online của Co.op Online (kho mặc định của web)" });
-      if (!have.has("EMART|Hồ Chí Minh")) add.push({ chain: "EMART", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "pvt", addr: EMART_STORES.pvt + " (đổi mã thành sala hoặc phi để lấy siêu thị khác)" });
+      // KFM, Co.op, GO!: chỉ 1 giá online chung cả nước (không phân Thành thị/Nông thôn thật) — luôn 1 dòng duy nhất, không tự thêm dòng Nông thôn vô nghĩa.
+      if (!have.has("KFM|Hồ Chí Minh|" + URBAN)) add.push({ chain: "KFM", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "online", addr: "Giá bán online của Kingfoodmart (cửa hàng mặc định của web)" });
+      if (!have.has("COOP|Hồ Chí Minh|" + URBAN)) add.push({ chain: "COOP", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "online", addr: "Giá bán online của Co.op Online (kho mặc định của web)" });
+      if (!have.has("EMART|Hồ Chí Minh|" + URBAN)) add.push({ chain: "EMART", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "pvt", addr: "Emart (đổi mã địa điểm — xem dropdown trên web Emart để lấy địa điểm khác)" });
+      if (!have.has("GO|Hồ Chí Minh|" + URBAN)) add.push({ chain: "GO", tinh: "Hồ Chí Minh", khu: URBAN, provinceId: "", wardId: "", storeId: "online", addr: "Giá tham khảo chung của web GO!/Big C/Tops Market (không theo siêu thị cụ thể)" });
       $("#t-p-cfg tbody").insertAdjacentHTML("beforeend", add.map(cfgRow).join(""));
       const n = (c) => add.filter((a) => a.chain === c).length;
-      msg.textContent = (add.length ? `Đã thêm ${n("LOTTE")} siêu thị LOTTE, ${n("KFM")} Kingfoodmart, ${n("COOP")} Co.op Online, ${n("EMART")} Emart. Xem lại rồi bấm Lưu thiết lập.` : "Các chuỗi khác đã có đủ trong thiết lập.")
+      msg.textContent = (add.length ? `Đã thêm ${n("LOTTE")} siêu thị LOTTE, ${n("KFM")} Kingfoodmart, ${n("COOP")} Co.op Online, ${n("EMART")} Emart, ${n("GO")} GO!/Big C/Tops. Xem lại rồi bấm Lưu thiết lập.` : "Các chuỗi khác đã có đủ trong thiết lập.")
         + (lotte.length ? "" : " Chưa có danh sách siêu thị LOTTE: mở tab bản đồ một lần rồi bấm lại để thêm LOTTE.");
     });
     $("#p-cfg-add").addEventListener("click", () => $("#t-p-cfg tbody").insertAdjacentHTML("beforeend", cfgRow({ tinh: "", provinceId: "", wardId: "", storeId: "" })));

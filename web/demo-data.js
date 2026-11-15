@@ -90,7 +90,15 @@
     const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
     const CATS = ["Sữa tươi", "Sữa chua uống liền", "Mì ăn liền", "Phở, bún ăn liền", "Dầu ăn", "Nước mắm", "Nước ngọt", "Cà phê hoà tan", "Bánh quy", "Kẹo cứng", "Rau lá", "Trái cây", "Thịt heo", "Nước giặt", "Nước rửa chén", "Sữa tắm", "Kem đánh răng", "Hàng đông chế biến"];   // tên ngành thật của BHX để thử cây ngành
     const PROV = [{ tinh: "Hồ Chí Minh", store: "demo-11", rate: 0.36, level: {} }, { tinh: "Hà Nội", store: "demo-22", rate: 0.3, level: {} }, { tinh: "Cần Thơ", store: "demo-33", rate: 0.26, level: {} },
-      { tinh: "Hồ Chí Minh · Nông thôn", store: "demo-12", rate: 0.3, level: {} }, { tinh: "Cần Thơ · Nông thôn", store: "demo-34", rate: 0.22, level: {} }];   // 2 tỉnh có thêm cửa hàng nông thôn
+      { tinh: "Hồ Chí Minh · Nông thôn", store: "demo-12", rate: 0.3, level: {} }, { tinh: "Hà Nội · Nông thôn", store: "demo-23", rate: 0.28, level: {} }, { tinh: "Cần Thơ · Nông thôn", store: "demo-34", rate: 0.22, level: {} },   // BHX: cả 3 tỉnh đều có nông thôn
+      // Chuỗi khác — minh hoạ đúng kiến trúc thật: LOTTE có cả Thành thị+Nông thôn (siêu thị thật theo tỉnh);
+      // KFM/Co.op/GO! chỉ 1 giá online chung cả nước (không có khái niệm nông thôn thật); Emart theo địa điểm riêng.
+      { tinh: "LOTTE: Hồ Chí Minh", store: "lotte-hcm", rate: 0.3, level: {} }, { tinh: "LOTTE: Hồ Chí Minh · Nông thôn", store: "lotte-hcm-nt", rate: 0.26, level: {} },
+      { tinh: "LOTTE: Hà Nội", store: "lotte-hn", rate: 0.32, level: {} },
+      { tinh: "KFM: Hồ Chí Minh", store: "online", rate: 0.25, level: {} },
+      { tinh: "COOP: Hồ Chí Minh", store: "online", rate: 0.28, level: {} },
+      { tinh: "EMART: Hồ Chí Minh", store: "pvt", rate: 0.2, level: {} },
+      { tinh: "GO: Hồ Chí Minh", store: "online", rate: 0.3, level: {} }];
     PROV.forEach((p) => CATS.forEach((c) => (p.level[c] = 0.97 + rnd() * 0.06)));
     const dates = Array.from({ length: 8 }, (_, w) => new Date(Date.now() - (7 - w) * 7 * 864e5).toISOString().slice(0, 10));
     const round = (x) => Math.round(x / 100) * 100, skus = [], items = [], hist = [], runs = [];

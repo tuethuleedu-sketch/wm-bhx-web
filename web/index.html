@@ -9,7 +9,7 @@
   <meta name="referrer" content="no-referrer">
   <title>WM+ ↔ BHX</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=202611121719">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- Đăng nhập -->
@@ -217,7 +217,7 @@
           <details id="p-setup"><summary>Thiết lập tỉnh và cửa hàng</summary>
             <p class="small" id="p-keys"></p>
             <div class="table-wrap"><table id="t-p-cfg"><thead><tr><th>Chuỗi</th><th>Tỉnh</th><th>Khu vực</th><th>provinceId</th><th>wardId</th><th>storeId</th><th>Địa chỉ cửa hàng</th><th></th></tr></thead><tbody></tbody></table></div>
-            <div class="p-actions"><button class="ghost" id="p-cfg-auto" hidden>Lấy đủ các tỉnh có BHX</button><button class="ghost" id="p-cfg-chains" title="LOTTE, Kingfoodmart, Co.op Online, Emart">Thêm các chuỗi khác</button><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
+            <div class="p-actions"><button class="ghost" id="p-cfg-auto" hidden>Lấy đủ các tỉnh có BHX</button><button class="ghost" id="p-cfg-chains" title="LOTTE, Kingfoodmart, Co.op Online, Emart, GO!/Big C/Tops">Thêm các chuỗi khác</button><button class="ghost" id="p-cfg-add">Thêm tỉnh</button><button class="ghost" id="p-cfg-save">Lưu thiết lập</button><span class="small" id="p-cfg-msg"></span></div>
           </details>
           <details id="p-import-box" hidden><summary>Chép lịch sử giá từ bản cũ (Apps Script)</summary>
             <p class="muted small p-note">Chép các lần lấy giá đã lưu ở bản cũ sang bản Firebase, để biểu đồ theo thời gian có đủ các mốc trước đây. Chỉ cần làm 1 lần; bấm lại cũng không nhân đôi dữ liệu. Ngày nào bản Firebase đã có giá thì giữ giá của bản Firebase.</p>
@@ -305,6 +305,13 @@
             </div>
             <details class="card"><summary><b>Chỉ số giá theo tỉnh và ngành</b></summary><div class="table-wrap"><table id="t-p-matrix"><thead></thead><tbody></tbody></table></div></details>
             <details class="card"><summary><b>SKU chênh giá nhiều nhất giữa các tỉnh</b></summary><div class="table-wrap"><table id="t-p-gap"><thead></thead><tbody></tbody></table></div></details>
+            <div class="card" id="p-chain-cmp"><h3>So sánh giá giữa các chuỗi</h3>
+              <p class="muted small" id="p-chain-cmp-need" hidden>Tỉnh này chỉ có 1 chuỗi có giá, chưa so sánh được. Vào Quản lý dữ liệu giá → Thêm các chuỗi khác để thêm chuỗi tại tỉnh này, rồi Cập nhật giá.</p>
+              <div id="p-chain-cmp-body">
+                <p class="muted small" id="p-chain-cmp-note"></p>
+                <div class="table-wrap"><table id="t-p-chain"><thead></thead><tbody></tbody></table></div>
+              </div>
+            </div>
           </section>
 
           <!-- 4. Xu hướng: đang thay đổi thế nào -->
@@ -402,17 +409,17 @@
   </section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=202611121719"></script>
-  <script src="demo-data.js?v=202611121719"></script>
-  <script src="gas-api.js?v=202611121719"></script>
-  <script src="upload.js?v=202611121719"></script>
-  <script src="area.js?v=202611121719"></script>
-  <script src="nearby.js?v=202611121719"></script>
-  <script src="firebase-api.js?v=202611121719"></script>
-  <script src="cat-tree.js?v=202611121719"></script>
-<script src="price.js?v=202611121719"></script>
-  <script src="bot.js?v=202611121719"></script>
-  <script src="quick-find.js?v=202611121719"></script>
-<script src="app.js?v=202611121719"></script>
+  <script src="config.js"></script>
+  <script src="demo-data.js"></script>
+  <script src="gas-api.js"></script>
+  <script src="upload.js"></script>
+  <script src="area.js"></script>
+  <script src="nearby.js"></script>
+  <script src="firebase-api.js"></script>
+  <script src="cat-tree.js"></script>
+<script src="price.js"></script>
+  <script src="bot.js"></script>
+  <script src="quick-find.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

@@ -70,19 +70,60 @@ window.CatTree = (function () {
       "bia, rượu, đồ uống có cồn": L.DU, "trà, cà phê, nước giải khát": L.DU, "đồ dùng gia đình": L.GD, "chăm sóc cá nhân": L.CS },
     COOP: { "rau củ, trái cây": L.TT, "thịt, trứng, hải sản": L.TT, "thức ăn chế biến, bún tươi": L.DM, "thực phẩm đông, mát": L.DM, "sữa, sản phẩm từ sữa": L.SUA,
       "thức uống": L.DU, "bánh, kẹo, snack": L.BK, "gia vị, gạo, thực phẩm khô": L.KHO, "sản phẩm cho bé": L.MB, "chăm sóc cá nhân": L.CS, "nhà cửa và đời sống": L.GD },
-    EMART: { "bánh mì, bánh ngọt": L.DM, "món ăn chế biến sẵn": L.DM, "rau củ": L.TT, "trái cây": L.TT, "trứng, thịt, hải sản": L.TT, "gạo": L.KHO, "đồ khô": L.KHO,
-      "thực phẩm ăn liền": L.KHO, "sữa": L.SUA, "thực phẩm mát": L.DM, "thực phẩm đông lạnh": L.DM, "bánh kẹo, snack": L.BK, "đồ uống": L.DU,
+    // Cập nhật 13/11/2026: Emart tách ngành nhỏ hơn (trước gộp chung "trứng, thịt, hải sản") — tên khớp thẳng BHX ở mức ngành nhỏ nhất có thể.
+    EMART: { "bánh mặn, bánh ngọt": L.DM, "món ăn chế biến sẵn hàn quốc": L.DM, "món ăn chế biến sẵn việt nam": L.DM, "món ăn chế biến sẵn khác": L.DM, "đồ uống (chế biến sẵn)": L.DU,
+      "rau lá": L.TT, "củ, quả": L.TT, "rau gia vị": L.TT, "nấm": L.TT, "đậu hũ": L.TT, "rau củ gap": L.TT, "rau củ hữu cơ": L.TT, "rau củ cắt sẵn": L.TT,
+      "trái cây nhập khẩu": L.TT, "trái cây nội địa": L.TT,
+      "trứng": L.TT, "thịt bò": L.TT, "thịt heo": L.TT, "thịt gia cầm": L.TT, "thủy hải sản": L.TT, "trứng, thịt khác": L.TT,
+      "gạo": L.KHO,
+      "bánh kẹo, trái cây sấy (khô)": L.BK, "hạt, trà (khô)": L.DU, "thịt, thủy hải sản khô": L.KHO,
+      "thực phẩm ăn liền": L.KHO, "thực phẩm đóng hộp": L.KHO,
+      "sữa nước": L.SUA, "sữa đặc, sữa bột": L.SUA,
+      "sản phẩm từ sữa (mát)": L.SUA, "sản phẩm từ thịt (mát)": L.DM, "thực phẩm mát khác": L.DM,
+      "thực phẩm chế biến sẵn (đông lạnh)": L.DM, "thịt, thủy hải sản (đông lạnh)": L.DM, "đông lạnh khác": L.DM,
+      "bánh": L.BK, "kẹo, mứt": L.BK, "sản phẩm sấy khô": L.BK,
+      "trà, cà phê": L.DU, "nước giải khát": L.DU, "nước suối": L.DU, "đồ uống có cồn": L.DU,
       "dầu ăn, bơ thực vật": L.GV, "nước chấm": L.GV, "gia vị, nước sốt": L.GV, "bột, hạt, nấm khô": L.KHO, "thực phẩm dinh dưỡng": L.SUA, "đồ chay": L.KHO,
       "chăm sóc răng miệng": L.CS, "chăm sóc da mặt": L.CS, "chăm sóc tóc": L.CS, "chăm sóc cơ thể": L.CS, "chăm sóc cá nhân khác": L.CS, "mẹ và bé": L.MB,
-      "vệ sinh nhà cửa": L.GG, "đồ dùng nhà bếp": L.GD, "đồ dùng phòng tắm": L.GD, "đồ dùng gia đình khác": L.GD,
+      "giấy": L.CS, "giặt giũ": L.GG, "tẩy rửa": L.GG, "khử mùi, diệt côn trùng": L.GG, "dụng cụ vệ sinh": L.GG, "đồ gia dụng": L.GD,
+      "dụng cụ nhà bếp": L.GD, "dụng cụ ăn uống": L.GD, "phòng tắm": L.GD, "nhà cửa khác": L.GD,
       "no brand: ăn liền, gia vị": L.KHO, "no brand: bánh kẹo": L.BK, "no brand: đồ uống": L.DU, "no brand: đông lạnh": L.DM, "no brand: chăm sóc cá nhân": L.CS, "no brand: nhà cửa": L.GG,
-      "hàng hàn: thực phẩm": L.KHO, "hàng hàn: chăm sóc cá nhân": L.CS, "hàng hàn: nhà cửa": L.GG },
+      "hàng hàn: gia vị, xốt": L.GV, "hàng hàn: ăn liền": L.KHO, "hàng hàn: bánh kẹo": L.BK, "hàng hàn: sữa, dinh dưỡng": L.SUA, "hàng hàn: đồ uống": L.DU,
+      "hàng hàn: mát, đông lạnh": L.DM, "hàng hàn: rong biển, kim chi": L.KHO, "hàng hàn: chăm sóc cá nhân": L.CS, "hàng hàn: nhà cửa": L.GG },
+    // GO!/Big C/Tops Market: tên ngành lớn trên web đã khớp thẳng tên BHX (không cần map vòng qua tên riêng của chuỗi).
+    GO: { "thịt heo": L.TT, "thịt gia cầm": L.TT, "thủy hải sản": L.TT, "trứng": L.TT, "thịt bò": L.TT, "rau, củ, nấm": L.TT, "trái cây": L.TT,
+      "sữa các loại": L.SUA, "bánh mì, bánh ngọt": L.DM, "nguyên liệu - gia vị": L.GV, "gạo, mì, bún": L.KHO, "món ăn nhanh": L.DM, "thực phẩm đông mát": L.DM,
+      "xúc xích & đồ hộp": L.KHO, "bánh kẹo các loại": L.BK, "đồ uống các loại": L.DU, "chăm sóc nhà cửa": L.GG, "chăm sóc cá nhân": L.CS, "chăm sóc cho bé": L.MB,
+      "khăn, giấy vệ sinh": L.CS, "đồ dùng gia đình": L.GD, "đồ dùng nhà bếp": L.GD, "đồ điện gia dụng": L.GD },
   };
+  // Bảng ánh xạ ngành NHỎ chính thức (không phải so khớp chữ may rủi) — lập 15/11/2026 bằng dữ liệu thật gọi trực tiếp
+  // từ API/trang mỗi chuỗi (xem ghi chú trong lịch sử trò chuyện/HANDOFF). Hiện chỉ làm xong nhóm "Thịt, cá, trứng, rau củ"
+  // (9 ngành nhỏ) — nhóm khác chưa có thì renderChainCompare tự rơi về so khớp chữ như trước (không vỡ, không sai, chỉ kém chi tiết hơn).
+  // Nhiều tên của 1 chuỗi có thể cùng quy về 1 ngành nhỏ BHX (ví dụ Co.op "Cá" + "Hải sản" đều → "Cá, hải sản").
+  const LEAF_MAP = {
+    LOTTE: { "thịt heo": "Thịt heo", "thịt bò": "Thịt bò", "thịt gà": "Thịt gà, vịt", "thịt gà khác": "Thịt gà, vịt",
+      "thủy sản tươi sống": "Cá, hải sản", "trứng gà": "Trứng gà, vịt, cút", "trứng vịt": "Trứng gà, vịt, cút",
+      "rau lá": "Rau lá", "rau củ": "Củ, quả", "nấm": "Nấm các loại",
+      "trái cây": "Trái cây", "táo, lê": "Trái cây", "dưa hấu, dưa lưới": "Trái cây", "cam, bưởi, quýt": "Trái cây",
+      "chuối": "Trái cây", "xoài": "Trái cây", "nho, cherry, dâu, kiwi": "Trái cây", "trái cây khác": "Trái cây" },
+    KFM: { "thịt heo": "Thịt heo", "thịt bò": "Thịt bò", "thịt gia cầm": "Thịt gà, vịt",
+      "cá, thủy, hải sản tươi": "Cá, hải sản", "trứng gia cầm": "Trứng gà, vịt, cút" },
+    COOP: { "thịt heo": "Thịt heo", "thịt bò": "Thịt bò", "gà, vịt": "Thịt gà, vịt", "cá": "Cá, hải sản", "hải sản": "Cá, hải sản",
+      "trứng gà": "Trứng gà, vịt, cút", "trứng vịt": "Trứng gà, vịt, cút" },
+    EMART: { "thịt heo": "Thịt heo", "thịt bò": "Thịt bò", "thịt gia cầm": "Thịt gà, vịt", "thủy hải sản": "Cá, hải sản", "trứng": "Trứng gà, vịt, cút",
+      "rau lá": "Rau lá", "củ, quả": "Củ, quả", "nấm": "Nấm các loại", "trái cây nhập khẩu": "Trái cây", "trái cây nội địa": "Trái cây" },
+    GO: { "thịt heo": "Thịt heo", "thịt bò": "Thịt bò", "thịt gia cầm": "Thịt gà, vịt", "thủy hải sản": "Cá, hải sản", "trứng": "Trứng gà, vịt, cút", "trái cây": "Trái cây" },
+  };
+  const LEAVES = new Set();
+  Object.values(TREE).forEach((groups) => Object.values(groups).forEach((cats) => cats.forEach((c) => LEAVES.add(norm(c)))));
   return {
     // [ngành lớn, nhóm] của ngành thuộc chuỗi khác BHX: nhóm = ngành lớn của chuỗi đó
     ofGroup: (chain, grp) => [(GROUPS[chain] || {})[norm(grp)] || OTHER, grp || OTHER],
     // [ngành lớn, nhóm] của một ngành BHX
     of: (cat) => map.get(norm(cat)) || [OTHER, OTHER],
+    // Tên ngành NHỎ chuẩn (theo đúng tên BHX) của 1 ngành thuộc chuỗi bất kỳ — null nếu chưa lập được (nhóm khác chưa làm).
+    // BHX: trả lại chính tên đó nếu đúng là 1 trong 153 ngành nhỏ đã biết.
+    leafOf: (chain, cat) => { const n = norm(cat); return chain === "BHX" ? (LEAVES.has(n) ? cat : null) : ((LEAF_MAP[chain] || {})[n] || null); },
     // thứ tự ngành lớn và nhóm như trong cây, "Khác" cuối cùng
     rank: (l1, l2) => { const a = order.indexOf(l1), g = TREE[l1] ? Object.keys(TREE[l1]).indexOf(l2) : -1; return (a < 0 ? 99 : a) * 100 + (l2 === undefined ? 0 : g < 0 ? 99 : g); },
   };

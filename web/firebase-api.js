@@ -252,7 +252,7 @@
   // Mỗi tỉnh tối đa 2 cửa hàng: Thành thị và Nông thôn. Giá lưu theo "nơi lấy giá": Thành thị giữ tên tỉnh (khớp dữ liệu cũ), Nông thôn thêm " · Nông thôn".
   const URBAN = "Thành thị", RURAL = "Nông thôn";
   // Chuỗi khác BHX: tên nơi lấy giá có mã chuỗi ở đầu, ví dụ "LOTTE: Hồ Chí Minh".
-  const OTHER_CHAINS = ["LOTTE", "KFM", "COOP", "EMART"];
+  const OTHER_CHAINS = ["LOTTE", "KFM", "COOP", "EMART", "GO"];
   const chainOf = (p) => (OTHER_CHAINS.includes(p.chain) ? p.chain : "BHX");
   const locName = (p) => (chainOf(p) === "BHX" ? "" : chainOf(p) + ": ") + (p.khu === RURAL ? `${p.tinh} · ${RURAL}` : p.tinh);
   const metaProvinces = (m) => (m.provinces ? JSON.parse(m.provinces) : DEFAULT).map((p) => ({ ...p, khu: p.khu === RURAL ? RURAL : URBAN }));
@@ -379,8 +379,8 @@
   const LOTTE_API = "https://www.lottemart.vn/v1/p/mart/es/vi_", LOTTE_SIZE = 1000;
   // Ngành lớn của LOTTE có bán ở BHX/WM (bỏ điện gia dụng, thú cưng, thời trang, thể thao).
   const LOTTE_CATS = [3, 266, 495, 285, 303, 167, 506, 200, 186, 161, 143, 231, 111, 140, 226, 122, 261, 314, 516, 325, 351, 369];
-  const CHAIN_NAME = { BHX: "BHX", LOTTE: "LOTTE", KFM: "Kingfoodmart", COOP: "Co.op Online", EMART: "Emart" };
-  const EMART_STORES = ["pvt", "sala", "phi"];
+  const CHAIN_NAME = { BHX: "BHX", LOTTE: "LOTTE", KFM: "Kingfoodmart", COOP: "Co.op Online", EMART: "Emart", GO: "GO!/Big C/Tops" };
+  // Không còn chốt cứng danh sách mã Emart — gas.emartPricePage tự đọc dropdown thật của web Emart, báo lỗi rõ nếu mã sai.
   async function lottePage(store, cat, page) {
     let last = "";
     for (let a = 0; a < RETRY; a++) {
@@ -422,17 +422,18 @@
   }
   // Kingfoodmart: web không cho trình duyệt ở trang khác gọi thẳng, nên Apps Script lấy hộ từng trang (không ghi gì vào Sheet).
   // Co.op Online và Emart cũng vậy: Apps Script lấy hộ (Co.op theo trang 1.000 SKU, Emart mỗi lần 1 ngành của 1 siêu thị).
-  let kfmCats = null, coopCats = null, emartCats = null;
+  let kfmCats = null, coopCats = null, emartCats = null, goCats = null;
   async function catsFor(p) {
     const c = chainOf(p);
     if (c === "LOTTE") return lotteLeaves(p.storeId);
     if (c === "KFM") { if (!kfmCats) kfmCats = (await gas.kfmPricePage("", 1)).cats.map((x) => x.slug); return kfmCats; }
     if (c === "COOP") { if (!coopCats) coopCats = (await gas.coopPricePage("", 1)).cats.map((x) => x.slug); return coopCats; }
     if (c === "EMART") { if (!emartCats) emartCats = (await gas.emartPricePage(p.storeId, "")).cats.map((x) => x.id); return emartCats; }
+    if (c === "GO") { if (!goCats) goCats = (await gas.goPricePage("")).cats.map((x) => x.slug); return goCats; }
     return CATS;
   }
   const catsLen = (p) => { const c = chainOf(p);
-    return c === "LOTTE" ? (lotteTree.get(p.storeId) || { length: 90 }).length : c === "KFM" ? (kfmCats ? kfmCats.length : 15) : c === "COOP" ? (coopCats ? coopCats.length : 11) : c === "EMART" ? (emartCats ? emartCats.length : 38) : CATS.length; };
+    return c === "LOTTE" ? (lotteTree.get(p.storeId) || { length: 90 }).length : c === "KFM" ? (kfmCats ? kfmCats.length : 15) : c === "COOP" ? (coopCats ? coopCats.length : 11) : c === "EMART" ? (emartCats ? emartCats.length : 38) : c === "GO" ? (goCats ? goCats.length : 23) : CATS.length; };
   const SRC = {
     BHX: { page: async (p, cat, page) => { const l = await bhxPage(p, cat, page); return { rows: l.map((x) => rowOf(x, p)), more: l.length === PAGE }; } },
     LOTTE: { page: async (p, cat, page) => {
@@ -442,6 +443,7 @@
     KFM: { page: async (p, slug, page) => { const d = await gas.kfmPricePage(slug, page + 1); return { rows: d.items, more: d.page < d.last }; } },
     COOP: { page: async (p, slug, page) => { const d = await gas.coopPricePage(slug, page + 1); return { rows: d.items, more: d.page < d.last }; } },
     EMART: { page: async (p, cat) => { const d = await gas.emartPricePage(p.storeId, cat); return { rows: d.items, more: false }; } },
+    GO: { page: async (p, cat) => { const d = await gas.goPricePage(cat); return { rows: d.items, more: false }; } },
   };
 
   let job = null, buf = null, shards = null;
@@ -550,7 +552,7 @@
         if (o.chain === "BHX") ["provinceId", "wardId", "storeId"].forEach((k) => { if (!/^\d{1,12}$/.test(o[k])) throw new Error(`${locName(o)}: ${k} phải là số`); });
         else if (o.chain === "LOTTE" && !/^[a-z]{2,6}$/.test(o.storeId)) throw new Error(`${locName(o)}: mã siêu thị LOTTE là 2–6 chữ thường, ví dụ nsg`);
         else if (o.chain === "KFM" || o.chain === "COOP") o.storeId = "online";
-        else if (o.chain === "EMART" && !EMART_STORES.includes(o.storeId)) throw new Error(`${locName(o)}: mã siêu thị Emart là pvt, sala hoặc phi`);
+        else if (o.chain === "EMART" && !o.storeId) throw new Error(`${locName(o)}: chưa có mã địa điểm Emart (xem web Emart hoặc để trống rồi bấm Thêm các chuỗi khác)`);
         return o;
       });
       await metaRef().set({ provinces: pack(clean) }, { merge: true });
