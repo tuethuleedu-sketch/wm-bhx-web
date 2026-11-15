@@ -448,7 +448,9 @@ window.WMPrice = (function () {
     $("#p-chain-cmp-body").hidden = !many;
     if (!many) return;
     // Ưu tiên bảng ánh xạ chính thức (CatTree.leafOf) nếu nhóm đó đã lập; chưa lập thì rơi về so khớp chữ như trước.
-    const leafName = (l, x) => CatTree.leafOf(l.chain, x.cat || "") || x.cat || "";
+    // Khớp được ngành nhỏ (LEAF_MAP) thì dùng; chưa lập mapping cho nhóm đó thì PHẢI rơi về ngành lớn chung
+    // (x.l1, đã chuẩn hoá cho mọi chuỗi) — tuyệt đối không rơi về tên gốc riêng của từng chuỗi (sẽ không khớp được ai).
+    const leafName = (l, x) => CatTree.leafOf(l.chain, x.cat || "") || x.l1 || x.cat || "";
     const label = new Map();
     locs.forEach((l) => l.active.forEach((x) => { const nm = leafName(l, x), k = plain(nm); if (k && !label.has(k)) label.set(k, nm); }));
     const keys = [...label.keys()].sort((a, b) => label.get(a).localeCompare(label.get(b), "vi"));
